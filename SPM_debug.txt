@@ -1,0 +1,96 @@
+Subject: [PATCH] Generate reproducible output independently of the build-path
+To: GCC Patches <gcc-patches@gcc.gnu.org>
+Cc: Ximin Luo <infinity0@pwned.gg>
+
+(Please keep me on CC, I am not subscribed)
+
+Background
+==========
+
+We are on a long journey to make build processes be able to reproduce the build
+outputs independently of which filesystem path the build is being executed from
+- e.g. if the executing user doesn't have root access to be able to execute it
+under a standard path such as /build. This currently is making about 2k-3k [1]
+packages in Debian unreproducible when build-paths are varied across builds.
+
+[1] https://tests.reproducible-builds.org/debian/issues/unstable/captures_build_path_issue.html
+
+Previous attempts have involved using -fdebug-prefix-map to strip away the
+prefix of an absolute path, leaving behind the part relative to the top-level
+directory of the source code, which is reproducible. But this flag was itself
+stored in DW_AT_producer, which makes the final output unreproducible. This was
+pointed out in bug 68848 and fixed in r231835.
+
+However, through more testing, we have found out that the fix just mentioned is
+not enough to achieve reproducibility in practice. The main issue is that many
+different packages like to store CFLAGS et. al. in arbitrary ways. So if we add
+an explicit -fdebug-prefix-map flag to the system-level CFLAGS etc, this will
+often propagate into the build result, making it again dependent on the
+build-path, and not reproducible. For example:
+
+Some packages embed compiler flags into their pkg-config files (or equivalent):
+https://tests.reproducible-builds.org/debian/rb-pkg/unstable/amd64/diffoscope-results/curl.html
+https://tests.reproducible-builds.org/debian/rb-pkg/unstable/amd64/diffoscope-results/perl.html
+https://tests.reproducible-builds.org/debian/rb-pkg/unstable/amd64/diffoscope-results/qt4-x11.html
+https://tests.reproducible-builds.org/debian/rb-pkg/unstable/amd64/diffoscope-results/fflas-ffpack.html
+https://tests.reproducible-builds.org/debian/rb-pkg/unstable/amd64/diffoscope-results/sip4.html
+
+Other packages embed compiler flags directly into the binary:
+https://tests.reproducible-builds.org/debian/rb-pkg/unstable/amd64/diffoscope-results/singular.html
+https://tests.reproducible-builds.org/debian/rb-pkg/unstable/amd64/diffoscope-results/mutt.html
+
+etc etc.
+
+We think it's not appropriate to patch all (3k+) of these packages to strip out
+-fdebug-prefix-map flags. This would involve adding quite complex logic to
+everyone's build scripts, and we have to adapt this logic every single time to
+that particular package. Also, in general CFLAGS is *supposed* to affect the
+compiler output, and saving it unconditionally is quite a reasonable thing for
+packages to do. If we tried to patch all of these packages, we would be turning
+"reproducible builds" in to a costly opt-in feature, rather than on-by-default
+that everyone can easily benefit from.
+
+So, we believe it is better to patch GCC centrally. Our proposed solution is 
+similar to (a) the SOURCE_DATE_EPOCH environment variable which was previously 
+accepted into GCC and was used to successfully make 400+ packages reproducible, 
+and (b) the -fdebug-prefix-map mechanism that already exists in GCC and which 
+nearly but not quite, achieves at-scale build-path-independent reproducibility.
+
+Proposal
+========
+
+This patch series adds a new environment variable SOURCE_PREFIX_MAP. When this
+is set, GCC will treat this as an implicit "-fdebug-prefix-map=$value"
+command-line argument. This makes the final binary output reproducible, and
+also hides the unreproducible value (the build path prefix) from CFLAGS et. al.
+which everyone is (understandably) embedding as-is into their build output.
+
+This environment variable also acts on the __FILE__ macro, mapping it in the
+same way that debug-prefix-map works for debug symbols. We have seen that
+__FILE__ is also a very large source of unreproducibility, and is represented
+quite heavily in the 3k+ figure given above.
+
+Finally, we tweak the __TIMESTAMP__ macro so it honours SOURCE_DATE_EPOCH, in a
+similar way to how __DATE__ and __TIME__ do so already.
+
+More details are given in the headers of the patch files themselves.
+
+Testing
+=======
+
+I've tested these patches on a Debian testing/unstable x86_64-linux-gnu system.
+So far I've only run the new tests that this patch adds, on a disable-bootstrap
+build. I will do a full bootstrap and run the full testsuite over the next few
+days, both with and without this patch, and report back.
+
+Copyright disclaimer
+====================
+
+I dedicate these patches to the public domain by waiving all of my rights to
+the work worldwide under copyright law, including all related and neighboring
+rights, to the extent allowed by law.
+
+See https://creativecommons.org/publicdomain/zero/1.0/legalcode for full text.
+
+Please let me know if the above is insufficient and I will be happy to sign any
+relevant forms.

@@ -1,0 +1,632 @@
+Subject: [PATCH 3/4] Use SOURCE_PREFIX_MAP envvar to transform __FILE__
+
+Honour the SOURCE_PREFIX_MAP environment variable when expanding the __FILE__
+macro, in the same way that debug-prefix-map works for debugging symbol paths.
+
+This patch follows similar lines to the earlier patch for SOURCE_DATE_EPOCH.
+Specifically, we read the environment variable not in libcpp but via a hook
+which has an implementation defined in gcc/c-family. However, to achieve this
+is more complex than the earlier patch: we need to share the prefix_map data
+structure and associated functions between libcpp and c-family. Therefore, we
+need to move these to libiberty. (For comparison, the SOURCE_DATE_EPOCH patch
+did not need this because time_t et. al. are in the standard C library.)
+
+Acknowledgements
+----------------
+
+Dhole <dhole@openmailbox.org> who wrote the earlier patch for SOURCE_DATE_EPOCH
+which saved me a lot of time on figuring out what to edit.
+
+ChangeLogs
+----------
+
+include/ChangeLog:
+
+2016-11-01  Ximin Luo  <infinity0@pwned.gg>
+
+	* prefix-map.h: New file, mostly derived from /gcc/final.c.
+
+libiberty/ChangeLog:
+
+2016-11-01  Ximin Luo  <infinity0@pwned.gg>
+
+	* prefix-map.c: New file, mostly derived from /gcc/final.c.
+	* Makefile.in: Update for new files.
+
+gcc/ChangeLog:
+
+2016-11-01  Ximin Luo  <infinity0@pwned.gg>
+
+	* final.c: Generalise and refactor code related to debug_prefix_map.
+	Move some of it to /libiberty/prefix-map.c, /include/prefix-map.h
+	and refactor the remaining code to use the moved-out things.
+	* doc/invoke.texi (Environment Variables): Update SOURCE_PREFIX_MAP to
+	describe how it affects __FILE__ expansion.
+
+gcc/c-family/ChangeLog:
+
+2016-11-01  Ximin Luo  <infinity0@pwned.gg>
+
+	* c-common.c (cb_get_source_prefix_map): Define new call target.
+	* c-common.h (cb_get_source_prefix_map): Declare call target.
+	* c-lex.c (init_c_lex): Set the get_source_prefix_map callback.
+
+libcpp/ChangeLog:
+
+2016-11-01  Ximin Luo  <infinity0@pwned.gg>
+
+	* include/cpplib.h (cpp_callbacks): Add get_source_prefix_map
+	callback.
+	* init.c (cpp_create_reader): Initialise source_prefix_map field.
+	* internal.h (cpp_reader): Add new field source_prefix_map.
+	* macro.c (_cpp_builtin_macro_text): Set the source_prefix_map field
+	if unset and apply it to the __FILE__ macro.
+
+gcc/testsuite/ChangeLog:
+
+2016-11-01  Ximin Luo  <infinity0@pwned.gg>
+
+	* gcc.dg/cpp/source_prefix_map-1.c: New test.
+	* gcc.dg/cpp/source_prefix_map-2.c: New test.
+
+Index: gcc-7-20161106/include/prefix-map.h
+===================================================================
+--- /dev/null
++++ gcc-7-20161106/include/prefix-map.h
+@@ -0,0 +1,71 @@
++/* Declarations for manipulating filename prefixes.
++
++   Copyright (C) 2016 Free Software Foundation, Inc.
++
++   This program is free software; you can redistribute it and/or modify
++   it under the terms of the GNU General Public License as published by
++   the Free Software Foundation; either version 2, or (at your option)
++   any later version.
++
++   This program is distributed in the hope that it will be useful,
++   but WITHOUT ANY WARRANTY; without even the implied warranty of
++   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
++   GNU General Public License for more details.
++
++   You should have received a copy of the GNU General Public License
++   along with this program; if not, write to the Free Software Foundation,
++   Inc., 51 Franklin Street - Fifth Floor, Boston, MA 02110-1301, USA.  */
++
++#ifndef _PREFIX_MAP_H
++#define _PREFIX_MAP_H
++
++#ifdef __cplusplus
++extern "C" {
++#endif
++
++#ifdef HAVE_STDLIB_H
++#include <stdlib.h>
++#endif
++
++/* Linked-list of mappings from old prefixes to new prefixes.  */
++
++struct prefix_map
++{
++  const char *old_prefix;
++  const char *new_prefix;
++  size_t old_len;
++  size_t new_len;
++  struct prefix_map *next;
++};
++
++/* Parse a single prefix-map.
++
++   The string `arg' is split at the final '=' character.  The part before
++   it is used to set `map->old_prefix' and `map->old_len', and the part
++   after it is used to set `map->new_prefix' and `map->new_len'.
++
++   If `arg' does not contain a '=' then 0 is returned.  Otherwise, a
++   non-zero value is returned.
++   */
++
++extern int parse_prefix_map (const char *arg, struct prefix_map *map);
++
++/* Perform mapping of filename prefixes.
++
++   Return the filename corresponding to `old_name'.  The return value is
++   equal to `old_name' if no transformation occurred, else it is equal
++   to `new_name' where the new filename is stored.
++
++   On entry into this function, `new_name' must be able to hold at least
++   `(old_name - map->old_len + map->old_len + 1)' characters, where
++   `map' is the mapping that will be selected and performed.
++   */
++
++extern const char *apply_prefix_map (const char *old_name, char *new_name,
++				     struct prefix_map *map_head);
++
++#ifdef __cplusplus
++}
++#endif
++
++#endif /* _PREFIX_MAP_H */
+Index: gcc-7-20161106/libiberty/prefix-map.c
+===================================================================
+--- /dev/null
++++ gcc-7-20161106/libiberty/prefix-map.c
+@@ -0,0 +1,88 @@
++/* Definitions for manipulating filename prefixes.
++
++   Copyright (C) 2016 Free Software Foundation, Inc.
++
++   This program is free software; you can redistribute it and/or modify
++   it under the terms of the GNU General Public License as published by
++   the Free Software Foundation; either version 2, or (at your option)
++   any later version.
++
++   This program is distributed in the hope that it will be useful,
++   but WITHOUT ANY WARRANTY; without even the implied warranty of
++   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
++   GNU General Public License for more details.
++
++   You should have received a copy of the GNU General Public License
++   along with this program; if not, write to the Free Software Foundation,
++   Inc., 51 Franklin Street - Fifth Floor, Boston, MA 02110-1301, USA.  */
++
++#ifdef HAVE_CONFIG_H
++#include "config.h"
++#endif
++
++#ifdef HAVE_STRING_H
++#include <string.h>
++#endif
++
++#ifdef HAVE_STDLIB_H
++#include <stdlib.h>
++#endif
++
++#include "filenames.h"
++#include "libiberty.h"
++#include "prefix-map.h"
++
++/* Parse a single prefix-map.
++
++   The string `arg' is split at the final '=' character.  The part before
++   it is used to set `map->old_prefix' and `map->old_len', and the part
++   after it is used to set `map->new_prefix' and `map->new_len'.
++
++   If `arg' does not contain a '=' then 0 is returned.  Otherwise, a
++   non-zero value is returned.
++   */
++int
++parse_prefix_map (const char *arg, struct prefix_map *map)
++{
++  const char *p;
++  p = strrchr (arg, '=');
++  if (!p)
++    {
++      return 0;
++    }
++  map->old_prefix = xstrndup (arg, p - arg);
++  map->old_len = p - arg;
++  p++;
++  map->new_prefix = xstrdup (p);
++  map->new_len = strlen (p);
++  return 1;
++}
++
++/* Perform mapping of filename prefixes.
++
++   Return the filename corresponding to `old_name'.  The return value is
++   equal to `old_name' if no transformation occurred, else it is equal
++   to `new_name' where the new filename is stored.
++
++   On entry into this function, `new_name' must be able to hold at least
++   `(old_name - map->old_len + map->old_len + 1)' characters, where
++   `map' is the mapping that will be selected and performed.
++   */
++const char *
++apply_prefix_map (const char *old_name, char *new_name,
++		  struct prefix_map *map_head)
++{
++  struct prefix_map *map;
++  const char *name;
++
++  for (map = map_head; map; map = map->next)
++    if (filename_ncmp (old_name, map->old_prefix, map->old_len) == 0)
++      break;
++  if (!map)
++    return old_name;
++
++  name = old_name + map->old_len;
++  memcpy (new_name, map->new_prefix, map->new_len);
++  memcpy (new_name + map->new_len, name, strlen (name) + 1);
++  return new_name;
++}
+Index: gcc-7-20161106/libiberty/Makefile.in
+===================================================================
+--- gcc-7-20161106.orig/libiberty/Makefile.in
++++ gcc-7-20161106/libiberty/Makefile.in
+@@ -145,6 +145,7 @@ CFILES = alloca.c argv.c asprintf.c atex
+ 	 pex-common.c pex-djgpp.c pex-msdos.c pex-one.c			\
+ 	 pex-unix.c pex-win32.c						\
+          physmem.c putenv.c						\
++	prefix-map.c \
+ 	random.c regex.c rename.c rindex.c				\
+ 	safe-ctype.c setenv.c setproctitle.c sha1.c sigsetmask.c        \
+ 	 simple-object.c simple-object-coff.c simple-object-elf.c	\
+@@ -183,6 +184,7 @@ REQUIRED_OFILES =							\
+ 	./partition.$(objext) ./pexecute.$(objext) ./physmem.$(objext)	\
+ 	./pex-common.$(objext) ./pex-one.$(objext)			\
+ 	./@pexecute@.$(objext) ./vprintf-support.$(objext)		\
++	./prefix-map.$(objext) \
+ 	./safe-ctype.$(objext)						\
+ 	./simple-object.$(objext) ./simple-object-coff.$(objext)	\
+ 	./simple-object-elf.$(objext) ./simple-object-mach-o.$(objext)	\
+@@ -756,7 +758,7 @@ $(CONFIGURED_OFILES): stamp-picdir stamp
+ 	$(COMPILE.c) $(srcdir)/fibheap.c $(OUTPUT_OPTION)
+ 
+ ./filename_cmp.$(objext): $(srcdir)/filename_cmp.c config.h $(INCDIR)/ansidecl.h \
+-	$(INCDIR)/filenames.h $(INCDIR)/hashtab.h \
++	$(INCDIR)/filenames.h $(INCDIR)/hashtab.h $(INCDIR)/libiberty.h \
+ 	$(INCDIR)/safe-ctype.h
+ 	if [ x"$(PICFLAG)" != x ]; then \
+ 	  $(COMPILE.c) $(PICFLAG) $(srcdir)/filename_cmp.c -o pic/$@; \
+@@ -1103,7 +1105,8 @@ $(CONFIGURED_OFILES): stamp-picdir stamp
+ 	$(COMPILE.c) $(srcdir)/pex-one.c $(OUTPUT_OPTION)
+ 
+ ./pex-unix.$(objext): $(srcdir)/pex-unix.c config.h $(INCDIR)/ansidecl.h \
+-	$(INCDIR)/libiberty.h $(srcdir)/pex-common.h
++	$(INCDIR)/environ.h $(INCDIR)/libiberty.h \
++	$(srcdir)/pex-common.h
+ 	if [ x"$(PICFLAG)" != x ]; then \
+ 	  $(COMPILE.c) $(PICFLAG) $(srcdir)/pex-unix.c -o pic/$@; \
+ 	else true; fi
+@@ -1142,6 +1145,15 @@ $(CONFIGURED_OFILES): stamp-picdir stamp
+ 	else true; fi
+ 	$(COMPILE.c) $(srcdir)/physmem.c $(OUTPUT_OPTION)
+ 
++./prefix-map.$(objext): $(srcdir)/prefix-map.c config.h $(INCDIR)/prefix-map.h
++	if [ x"$(PICFLAG)" != x ]; then \
++	  $(COMPILE.c) $(PICFLAG) $(srcdir)/prefix-map.c -o pic/$@; \
++	else true; fi
++	if [ x"$(NOASANFLAG)" != x ]; then \
++	  $(COMPILE.c) $(PICFLAG) $(NOASANFLAG) $(srcdir)/prefix-map.c -o noasan/$@; \
++	else true; fi
++	$(COMPILE.c) $(srcdir)/prefix-map.c $(OUTPUT_OPTION)
++
+ ./putenv.$(objext): $(srcdir)/putenv.c config.h $(INCDIR)/ansidecl.h
+ 	if [ x"$(PICFLAG)" != x ]; then \
+ 	  $(COMPILE.c) $(PICFLAG) $(srcdir)/putenv.c -o pic/$@; \
+@@ -1198,7 +1210,8 @@ $(CONFIGURED_OFILES): stamp-picdir stamp
+ 	else true; fi
+ 	$(COMPILE.c) $(srcdir)/safe-ctype.c $(OUTPUT_OPTION)
+ 
+-./setenv.$(objext): $(srcdir)/setenv.c config.h $(INCDIR)/ansidecl.h
++./setenv.$(objext): $(srcdir)/setenv.c config.h $(INCDIR)/ansidecl.h \
++	$(INCDIR)/environ.h
+ 	if [ x"$(PICFLAG)" != x ]; then \
+ 	  $(COMPILE.c) $(PICFLAG) $(srcdir)/setenv.c -o pic/$@; \
+ 	else true; fi
+@@ -1649,7 +1662,7 @@ $(CONFIGURED_OFILES): stamp-picdir stamp
+ 	$(COMPILE.c) $(srcdir)/xexit.c $(OUTPUT_OPTION)
+ 
+ ./xmalloc.$(objext): $(srcdir)/xmalloc.c config.h $(INCDIR)/ansidecl.h \
+-	$(INCDIR)/libiberty.h
++	$(INCDIR)/environ.h $(INCDIR)/libiberty.h
+ 	if [ x"$(PICFLAG)" != x ]; then \
+ 	  $(COMPILE.c) $(PICFLAG) $(srcdir)/xmalloc.c -o pic/$@; \
+ 	else true; fi
+@@ -1707,3 +1720,4 @@ $(CONFIGURED_OFILES): stamp-picdir stamp
+ 	  $(COMPILE.c) $(PICFLAG) $(NOASANFLAG) $(srcdir)/xvasprintf.c -o noasan/$@; \
+ 	else true; fi
+ 	$(COMPILE.c) $(srcdir)/xvasprintf.c $(OUTPUT_OPTION)
++
+Index: gcc-7-20161106/gcc/final.c
+===================================================================
+--- gcc-7-20161106.orig/gcc/final.c
++++ gcc-7-20161106/gcc/final.c
+@@ -46,6 +46,7 @@ along with GCC; see the file COPYING3.
+ #define INCLUDE_ALGORITHM /* reverse */
+ #include "system.h"
+ #include "coretypes.h"
++#include "prefix-map.h"
+ #include "backend.h"
+ #include "target.h"
+ #include "rtl.h"
+@@ -1502,22 +1503,11 @@ asm_str_count (const char *templ)
+   return count;
+ }
+ 
+-/* ??? This is probably the wrong place for these.  */
+-/* Structure recording the mapping from source file and directory
+-   names at compile time to those to be embedded in debug
+-   information.  */
+-struct debug_prefix_map
+-{
+-  const char *old_prefix;
+-  const char *new_prefix;
+-  size_t old_len;
+-  size_t new_len;
+-  struct debug_prefix_map *next;
+-};
+ 
+-/* Linked list of such structures.  */
+-static debug_prefix_map *debug_prefix_maps;
++/* Linked list of `struct prefix_map'.  */
++static prefix_map *debug_prefix_maps;
+ 
++static size_t max_prefix_replace = 0;
+ 
+ /* Record a debug file prefix mapping.  ARG is the argument to
+    -fdebug-prefix-map and must be of the form OLD=NEW.  */
+@@ -1525,23 +1515,19 @@ static debug_prefix_map *debug_prefix_ma
+ void
+ add_debug_prefix_map (const char *arg)
+ {
+-  debug_prefix_map *map;
+-  const char *p;
+-
+-  p = strrchr (arg, '=');
+-  if (!p)
++  prefix_map *map = XNEW (prefix_map);
++  if (!parse_prefix_map (arg, map))
+     {
+       error ("invalid value %qs for debug-prefix-map", arg);
++      free (map);
+       return;
+     }
+-  map = XNEW (debug_prefix_map);
+-  map->old_prefix = xstrndup (arg, p - arg);
+-  map->old_len = p - arg;
+-  p++;
+-  map->new_prefix = xstrdup (p);
+-  map->new_len = strlen (p);
++
+   map->next = debug_prefix_maps;
+   debug_prefix_maps = map;
++
++  if (map->new_len > max_prefix_replace)
++    max_prefix_replace = map->new_len;
+ }
+ 
+ /* Perform user-specified mapping of debug filename prefixes.  Return
+@@ -1550,22 +1536,13 @@ add_debug_prefix_map (const char *arg)
+ const char *
+ remap_debug_filename (const char *filename)
+ {
+-  debug_prefix_map *map;
+-  char *s;
+-  const char *name;
+-  size_t name_len;
+-
+-  for (map = debug_prefix_maps; map; map = map->next)
+-    if (filename_ncmp (filename, map->old_prefix, map->old_len) == 0)
+-      break;
+-  if (!map)
++  char *newname = (char *) alloca (strlen (filename) + max_prefix_replace + 1);
++  const char *name = apply_prefix_map (filename, newname, debug_prefix_maps);
++
++  if (name == filename)
+     return filename;
+-  name = filename + map->old_len;
+-  name_len = strlen (name) + 1;
+-  s = (char *) alloca (name_len + map->new_len);
+-  memcpy (s, map->new_prefix, map->new_len);
+-  memcpy (s + map->new_len, name, name_len);
+-  return ggc_strdup (s);
++
++  return ggc_strdup (newname);
+ }
+ 
+ /* Return true if DWARF2 debug info can be emitted for DECL.  */
+Index: gcc-7-20161106/gcc/doc/invoke.texi
+===================================================================
+--- gcc-7-20161106.orig/gcc/doc/invoke.texi
++++ gcc-7-20161106/gcc/doc/invoke.texi
+@@ -26286,7 +26286,8 @@ recognize and translate multibyte charac
+ @item SOURCE_PREFIX_MAP
+ @findex SOURCE_PREFIX_MAP
+ If this variable is set, it specifies a mapping that is used to
+-transform filepaths that are output in debug symbols.  This helps the
++transform filepaths that are output in debug symbols, as well as
++filepaths emitted when the __FILE__ macro is expanded.  This helps the
+ embedded paths become reproducible, without having the unreproducible
+ value be visible in other input sources---such as GCC command-line flags
+ or standardised build-time environment variables like
+Index: gcc-7-20161106/gcc/c-family/c-common.c
+===================================================================
+--- gcc-7-20161106.orig/gcc/c-family/c-common.c
++++ gcc-7-20161106/gcc/c-family/c-common.c
+@@ -21,6 +21,7 @@ along with GCC; see the file COPYING3.
+ 
+ #include "config.h"
+ #include "system.h"
++#include "prefix-map.h"
+ #include "coretypes.h"
+ #include "target.h"
+ #include "function.h"
+@@ -7928,6 +7929,31 @@ cb_get_source_date_epoch (cpp_reader *pf
+   return (time_t) epoch;
+ }
+ 
++/* Read SOURCE_PREFIX_MAP from environment to have deterministic relative
++   paths to replace embedded absolute paths to get reproducible results.
++   Returns NULL if SOURCE_PREFIX_MAP is not defined or badly formed.  */
++
++prefix_map *
++cb_get_source_prefix_map (cpp_reader *pfile ATTRIBUTE_UNUSED)
++{
++  const char *arg;
++  prefix_map *map;
++
++  arg = getenv ("SOURCE_PREFIX_MAP");
++  if (!arg)
++    return NULL;
++
++  map = XNEW (prefix_map);
++  if (parse_prefix_map (arg, map))
++    return map;
++
++  free (map);
++  error_at (input_location, "environment variable SOURCE_PREFIX_MAP must "
++	    "be of the form ${old}=${new}");
++
++  return NULL;
++}
++
+ /* Callback for libcpp for offering spelling suggestions for misspelled
+    directives.  GOAL is an unrecognized string; CANDIDATES is a
+    NULL-terminated array of candidate strings.  Return the closest
+Index: gcc-7-20161106/gcc/c-family/c-common.h
+===================================================================
+--- gcc-7-20161106.orig/gcc/c-family/c-common.h
++++ gcc-7-20161106/gcc/c-family/c-common.h
+@@ -1075,6 +1075,11 @@ extern time_t cb_get_source_date_epoch (
+    __TIME__ can store.  */
+ #define MAX_SOURCE_DATE_EPOCH HOST_WIDE_INT_C (253402300799)
+ 
++/* Read SOURCE_PREFIX_MAP from environment to have deterministic relative
++   paths to replace embedded absolute paths to get reproducible results.
++   Returns NULL if SOURCE_PREFIX_MAP is not defined or badly formed.  */
++extern prefix_map *cb_get_source_prefix_map (cpp_reader *pfile);
++
+ /* Callback for libcpp for offering spelling suggestions for misspelled
+    directives.  */
+ extern const char *cb_get_suggestion (cpp_reader *, const char *,
+Index: gcc-7-20161106/gcc/c-family/c-lex.c
+===================================================================
+--- gcc-7-20161106.orig/gcc/c-family/c-lex.c
++++ gcc-7-20161106/gcc/c-family/c-lex.c
+@@ -81,6 +81,7 @@ init_c_lex (void)
+   cb->read_pch = c_common_read_pch;
+   cb->has_attribute = c_common_has_attribute;
+   cb->get_source_date_epoch = cb_get_source_date_epoch;
++  cb->get_source_prefix_map = cb_get_source_prefix_map;
+   cb->get_suggestion = cb_get_suggestion;
+ 
+   /* Set the debug callbacks if we can use them.  */
+Index: gcc-7-20161106/libcpp/include/cpplib.h
+===================================================================
+--- gcc-7-20161106.orig/libcpp/include/cpplib.h
++++ gcc-7-20161106/libcpp/include/cpplib.h
+@@ -603,6 +603,9 @@ struct cpp_callbacks
+   /* Callback to parse SOURCE_DATE_EPOCH from environment.  */
+   time_t (*get_source_date_epoch) (cpp_reader *);
+ 
++  /* Callback to parse SOURCE_PREFIX_MAP from environment.  */
++  struct prefix_map *(*get_source_prefix_map) (cpp_reader *);
++
+   /* Callback for providing suggestions for misspelled directives.  */
+   const char *(*get_suggestion) (cpp_reader *, const char *, const char *const *);
+ };
+Index: gcc-7-20161106/libcpp/init.c
+===================================================================
+--- gcc-7-20161106.orig/libcpp/init.c
++++ gcc-7-20161106/libcpp/init.c
+@@ -261,6 +261,9 @@ cpp_create_reader (enum c_lang lang, cpp
+   /* Initialize source_date_epoch to -2 (not yet set).  */
+   pfile->source_date_epoch = (time_t) -2;
+ 
++  /* Initialize source_prefix_map to NULL (not yet set).  */
++  pfile->source_prefix_map = NULL;
++
+   /* The expression parser stack.  */
+   _cpp_expand_op_stack (pfile);
+ 
+Index: gcc-7-20161106/libcpp/internal.h
+===================================================================
+--- gcc-7-20161106.orig/libcpp/internal.h
++++ gcc-7-20161106/libcpp/internal.h
+@@ -507,6 +507,11 @@ struct cpp_reader
+      set to -1 to disable it or to a non-negative value to enable it.  */
+   time_t source_date_epoch;
+ 
++  /* Externally set prefix-map to transform absolute paths, useful for
++     reproducibility.  It should be initialized to NULL (not yet set or
++     disabled) or to a `struct prefix_map` value to enable it.  */
++  struct prefix_map *source_prefix_map;
++
+   /* EOF token, and a token forcing paste avoidance.  */
+   cpp_token avoid_paste;
+   cpp_token eof;
+Index: gcc-7-20161106/libcpp/macro.c
+===================================================================
+--- gcc-7-20161106.orig/libcpp/macro.c
++++ gcc-7-20161106/libcpp/macro.c
+@@ -26,6 +26,7 @@ along with this program; see the file CO
+ #include "system.h"
+ #include "cpplib.h"
+ #include "internal.h"
++#include "prefix-map.h"
+ 
+ typedef struct macro_arg macro_arg;
+ /* This structure represents the tokens of a macro argument.  These
+@@ -290,8 +291,22 @@ _cpp_builtin_macro_text (cpp_reader *pfi
+       {
+ 	unsigned int len;
+ 	const char *name;
++	char *newname;
+ 	uchar *buf;
++	prefix_map *map = pfile->source_prefix_map;
+ 	
++	/* Set a prefix-map for __FILE__ if SOURCE_PREFIX_MAP is defined.  */
++	if (map == NULL && pfile->cb.get_source_prefix_map != NULL)
++	  {
++	    map = pfile->cb.get_source_prefix_map (pfile);
++	    if (map == NULL)
++	      {
++		/* Set a dummy value to avoid doing the check again.  */
++		map = XNEW (prefix_map);
++		memset (map, 0, sizeof (prefix_map));
++	      }
++	  }
++
+ 	if (node->value.builtin == BT_FILE)
+ 	  name = linemap_get_expansion_filename (pfile->line_table,
+ 						 pfile->line_table->highest_line);
+@@ -301,6 +316,17 @@ _cpp_builtin_macro_text (cpp_reader *pfi
+ 	    if (!name)
+ 	      abort ();
+ 	  }
++
++	/* Strip source_prefix_map from name, if it's a prefix.  */
++	if (map != NULL && map->old_prefix != NULL)
++	  {
++	    newname = (char *) alloca (strlen (name)
++				       - map->old_len
++				       + map->new_len
++				       + 1);
++	    name = apply_prefix_map (name, newname, map);
++	  }
++
+ 	len = strlen (name);
+ 	buf = _cpp_unaligned_alloc (pfile, len * 2 + 3);
+ 	result = buf;
+Index: gcc-7-20161106/gcc/testsuite/gcc.dg/cpp/source_prefix_map-1.c
+===================================================================
+--- /dev/null
++++ gcc-7-20161106/gcc/testsuite/gcc.dg/cpp/source_prefix_map-1.c
+@@ -0,0 +1,11 @@
++/* __FILE__ should strip SOURCE_PREFIX_MAP if the latter is a prefix. */
++/* { dg-do run } */
++/* { dg-set-compiler-env-var SOURCE_PREFIX_MAP "$srcdir=MACROTEST" } */
++
++int
++main ()
++{
++  if (__builtin_strcmp (__FILE__, "MACROTEST/gcc.dg/cpp/source_prefix_map-1.c") != 0)
++    __builtin_abort ();
++  return 0;
++}
+Index: gcc-7-20161106/gcc/testsuite/gcc.dg/cpp/source_prefix_map-2.c
+===================================================================
+--- /dev/null
++++ gcc-7-20161106/gcc/testsuite/gcc.dg/cpp/source_prefix_map-2.c
+@@ -0,0 +1,11 @@
++/* __FILE__ should not be relative if SOURCE_PREFIX_MAP is not set, and gcc is
++   asked to compile an absolute filename as is the case with this test.  */
++/* { dg-do run } */
++
++int
++main ()
++{
++  if (__builtin_strcmp (__FILE__, "./gcc.dg/cpp/source_prefix_map-1.c") == 0)
++    __builtin_abort ();
++  return 0;
++}

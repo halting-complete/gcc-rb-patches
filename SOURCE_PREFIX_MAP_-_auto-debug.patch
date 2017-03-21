@@ -1,0 +1,142 @@
+Subject: [PATCH 1/4] Use SOURCE_PREFIX_MAP envvar as an implicit debug-prefix-map
+
+Define the SOURCE_PREFIX_MAP environment variable, and treat it as an implicit
+CLI -fdebug-prefix-map option specified before any explicit such options.
+
+Acknowledgements
+----------------
+
+Daniel Kahn Gillmor who wrote the patch for r231835, which saved me a lot of
+time figuring out what to edit.
+
+HW42 for discussion on the details of the proposal, and for suggesting that we
+retain the ability to map the prefix to something other than ".".
+
+ChangeLogs
+----------
+
+gcc/ChangeLog:
+
+2016-11-01  Ximin Luo  <infinity0@pwned.gg>
+
+	* opts-global.c (add_debug_prefix_map_from_envvar): Add the value of
+	SOURCE_PREFIX_MAP as a debug_prefix_map if the former is set.
+	(handle_common_deferred_options): Call add_debug_prefix_map_from_envvar
+	before processing options.
+	* final.c: (add_debug_prefix_map): Be less specific in the error message,
+	since it can also be triggered by the SOURCE_PREFIX_MAP variable.
+	* doc/invoke.texi (Environment Variables): Document form and behaviour of
+	SOURCE_PREFIX_MAP.
+
+gcc/testsuite/ChangeLog:
+
+2016-11-01  Ximin Luo  <infinity0@pwned.gg>
+
+	* gcc.dg/debug/dwarf2/source_prefix_map-1.c: New test.
+	* gcc.dg/debug/dwarf2/source_prefix_map-2.c: New test.
+
+Index: gcc-7-20161106/gcc/opts-global.c
+===================================================================
+--- gcc-7-20161106.orig/gcc/opts-global.c
++++ gcc-7-20161106/gcc/opts-global.c
+@@ -310,6 +310,21 @@ decode_options (struct gcc_options *opts
+   finish_options (opts, opts_set, loc);
+ }
+ 
++/* Add a debug-prefix-map using the SOURCE_PREFIX_MAP environment variable if
++   it is set.  */
++
++static void
++add_debug_prefix_map_from_envvar ()
++{
++  char *prefix_map;
++
++  prefix_map = getenv ("SOURCE_PREFIX_MAP");
++  if (!prefix_map)
++    return;
++
++  add_debug_prefix_map (prefix_map);
++}
++
+ /* Hold command-line options associated with stack limitation.  */
+ const char *opt_fstack_limit_symbol_arg = NULL;
+ int opt_fstack_limit_register_no = -1;
+@@ -335,6 +350,8 @@ handle_common_deferred_options (void)
+   if (flag_opt_info)
+     opt_info_switch_p (NULL);
+ 
++  add_debug_prefix_map_from_envvar ();
++
+   FOR_EACH_VEC_ELT (v, i, opt)
+     {
+       switch (opt->opt_index)
+Index: gcc-7-20161106/gcc/final.c
+===================================================================
+--- gcc-7-20161106.orig/gcc/final.c
++++ gcc-7-20161106/gcc/final.c
+@@ -1531,7 +1531,7 @@ add_debug_prefix_map (const char *arg)
+   p = strchr (arg, '=');
+   if (!p)
+     {
+-      error ("invalid argument %qs to -fdebug-prefix-map", arg);
++      error ("invalid value %qs for debug-prefix-map", arg);
+       return;
+     }
+   map = XNEW (debug_prefix_map);
+Index: gcc-7-20161106/gcc/doc/invoke.texi
+===================================================================
+--- gcc-7-20161106.orig/gcc/doc/invoke.texi
++++ gcc-7-20161106/gcc/doc/invoke.texi
+@@ -26282,6 +26282,25 @@ Recognize EUCJP characters.
+ If @env{LANG} is not defined, or if it has some other value, then the
+ compiler uses @code{mblen} and @code{mbtowc} as defined by the default locale to
+ recognize and translate multibyte characters.
++
++@item SOURCE_PREFIX_MAP
++@findex SOURCE_PREFIX_MAP
++If this variable is set, it specifies a mapping that is used to
++transform filepaths that are output in debug symbols.  This helps the
++embedded paths become reproducible, without having the unreproducible
++value be visible in other input sources---such as GCC command-line flags
++or standardised build-time environment variables like
++@code{CFLAGS}---that are commonly legitimately-embedded in the build
++output by higher-level build processes.
++
++The form and behaviour is similar to @option{-fdebug-prefix-map}.  That
++is, the value of @env{SOURCE_PREFIX_MAP} must be of the form
++@samp{@var{old}=@var{new}}.  The split occurs on the first @code{=}
++character, so that @var{old} cannot itself contain a @code{=}.
++
++Whenever an absolute source- or build-related filepath is to be emitted
++in a final end-result output, GCC will replace @var{old} with @var{new}
++if that filepath starts with @var{old}.
+ @end table
+ 
+ @noindent
+Index: gcc-7-20161106/gcc/testsuite/gcc.dg/debug/dwarf2/source_prefix_map-1.c
+===================================================================
+--- /dev/null
++++ gcc-7-20161106/gcc/testsuite/gcc.dg/debug/dwarf2/source_prefix_map-1.c
+@@ -0,0 +1,9 @@
++/* DW_AT_comp_dir should be relative if SOURCE_PREFIX_MAP is a prefix of it.  */
++/* { dg-do compile } */
++/* { dg-options "-gdwarf -dA" } */
++/* { dg-set-compiler-env-var SOURCE_PREFIX_MAP "[file dirname [pwd]]=DWARF2TEST" } */
++/* { dg-final { scan-assembler "DW_AT_comp_dir: \"DWARF2TEST/gcc" } } */
++
++void func (void)
++{
++}
+Index: gcc-7-20161106/gcc/testsuite/gcc.dg/debug/dwarf2/source_prefix_map-2.c
+===================================================================
+--- /dev/null
++++ gcc-7-20161106/gcc/testsuite/gcc.dg/debug/dwarf2/source_prefix_map-2.c
+@@ -0,0 +1,8 @@
++/* DW_AT_comp_dir should be absolute if SOURCE_PREFIX_MAP is not set.  */
++/* { dg-do compile } */
++/* { dg-options "-gdwarf -dA" } */
++/* { dg-final { scan-assembler "DW_AT_comp_dir: \"/" } } */
++
++void func (void)
++{
++}
