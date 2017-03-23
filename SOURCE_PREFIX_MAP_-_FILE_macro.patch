@@ -69,10 +69,10 @@ gcc/testsuite/ChangeLog:
 	* gcc.dg/cpp/source_prefix_map-1.c: New test.
 	* gcc.dg/cpp/source_prefix_map-2.c: New test.
 
-Index: gcc-7-20161106/include/prefix-map.h
+Index: gcc-7-20170319/include/prefix-map.h
 ===================================================================
 --- /dev/null
-+++ gcc-7-20161106/include/prefix-map.h
++++ gcc-7-20170319/include/prefix-map.h
 @@ -0,0 +1,71 @@
 +/* Declarations for manipulating filename prefixes.
 +
@@ -145,10 +145,10 @@ Index: gcc-7-20161106/include/prefix-map.h
 +#endif
 +
 +#endif /* _PREFIX_MAP_H */
-Index: gcc-7-20161106/libiberty/prefix-map.c
+Index: gcc-7-20170319/libiberty/prefix-map.c
 ===================================================================
 --- /dev/null
-+++ gcc-7-20161106/libiberty/prefix-map.c
++++ gcc-7-20170319/libiberty/prefix-map.c
 @@ -0,0 +1,88 @@
 +/* Definitions for manipulating filename prefixes.
 +
@@ -238,27 +238,27 @@ Index: gcc-7-20161106/libiberty/prefix-map.c
 +  memcpy (new_name + map->new_len, name, strlen (name) + 1);
 +  return new_name;
 +}
-Index: gcc-7-20161106/libiberty/Makefile.in
+Index: gcc-7-20170319/libiberty/Makefile.in
 ===================================================================
---- gcc-7-20161106.orig/libiberty/Makefile.in
-+++ gcc-7-20161106/libiberty/Makefile.in
-@@ -145,6 +145,7 @@ CFILES = alloca.c argv.c asprintf.c atex
+--- gcc-7-20170319.orig/libiberty/Makefile.in
++++ gcc-7-20170319/libiberty/Makefile.in
+@@ -143,6 +143,7 @@ CFILES = alloca.c argv.c asprintf.c atex
  	 pex-common.c pex-djgpp.c pex-msdos.c pex-one.c			\
  	 pex-unix.c pex-win32.c						\
           physmem.c putenv.c						\
 +	prefix-map.c \
  	random.c regex.c rename.c rindex.c				\
+ 	rust-demangle.c							\
  	safe-ctype.c setenv.c setproctitle.c sha1.c sigsetmask.c        \
- 	 simple-object.c simple-object-coff.c simple-object-elf.c	\
-@@ -183,6 +184,7 @@ REQUIRED_OFILES =							\
+@@ -182,6 +183,7 @@ REQUIRED_OFILES =							\
  	./partition.$(objext) ./pexecute.$(objext) ./physmem.$(objext)	\
  	./pex-common.$(objext) ./pex-one.$(objext)			\
  	./@pexecute@.$(objext) ./vprintf-support.$(objext)		\
 +	./prefix-map.$(objext) \
+ 	./rust-demangle.$(objext)					\
  	./safe-ctype.$(objext)						\
  	./simple-object.$(objext) ./simple-object-coff.$(objext)	\
- 	./simple-object-elf.$(objext) ./simple-object-mach-o.$(objext)	\
-@@ -756,7 +758,7 @@ $(CONFIGURED_OFILES): stamp-picdir stamp
+@@ -757,7 +759,7 @@ $(CONFIGURED_OFILES): stamp-picdir stamp
  	$(COMPILE.c) $(srcdir)/fibheap.c $(OUTPUT_OPTION)
  
  ./filename_cmp.$(objext): $(srcdir)/filename_cmp.c config.h $(INCDIR)/ansidecl.h \
@@ -267,7 +267,7 @@ Index: gcc-7-20161106/libiberty/Makefile.in
  	$(INCDIR)/safe-ctype.h
  	if [ x"$(PICFLAG)" != x ]; then \
  	  $(COMPILE.c) $(PICFLAG) $(srcdir)/filename_cmp.c -o pic/$@; \
-@@ -1103,7 +1105,8 @@ $(CONFIGURED_OFILES): stamp-picdir stamp
+@@ -1104,7 +1106,8 @@ $(CONFIGURED_OFILES): stamp-picdir stamp
  	$(COMPILE.c) $(srcdir)/pex-one.c $(OUTPUT_OPTION)
  
  ./pex-unix.$(objext): $(srcdir)/pex-unix.c config.h $(INCDIR)/ansidecl.h \
@@ -277,7 +277,7 @@ Index: gcc-7-20161106/libiberty/Makefile.in
  	if [ x"$(PICFLAG)" != x ]; then \
  	  $(COMPILE.c) $(PICFLAG) $(srcdir)/pex-unix.c -o pic/$@; \
  	else true; fi
-@@ -1142,6 +1145,15 @@ $(CONFIGURED_OFILES): stamp-picdir stamp
+@@ -1143,6 +1146,15 @@ $(CONFIGURED_OFILES): stamp-picdir stamp
  	else true; fi
  	$(COMPILE.c) $(srcdir)/physmem.c $(OUTPUT_OPTION)
  
@@ -293,7 +293,7 @@ Index: gcc-7-20161106/libiberty/Makefile.in
  ./putenv.$(objext): $(srcdir)/putenv.c config.h $(INCDIR)/ansidecl.h
  	if [ x"$(PICFLAG)" != x ]; then \
  	  $(COMPILE.c) $(PICFLAG) $(srcdir)/putenv.c -o pic/$@; \
-@@ -1198,7 +1210,8 @@ $(CONFIGURED_OFILES): stamp-picdir stamp
+@@ -1210,7 +1222,8 @@ $(CONFIGURED_OFILES): stamp-picdir stamp
  	else true; fi
  	$(COMPILE.c) $(srcdir)/safe-ctype.c $(OUTPUT_OPTION)
  
@@ -303,7 +303,7 @@ Index: gcc-7-20161106/libiberty/Makefile.in
  	if [ x"$(PICFLAG)" != x ]; then \
  	  $(COMPILE.c) $(PICFLAG) $(srcdir)/setenv.c -o pic/$@; \
  	else true; fi
-@@ -1649,7 +1662,7 @@ $(CONFIGURED_OFILES): stamp-picdir stamp
+@@ -1661,7 +1674,7 @@ $(CONFIGURED_OFILES): stamp-picdir stamp
  	$(COMPILE.c) $(srcdir)/xexit.c $(OUTPUT_OPTION)
  
  ./xmalloc.$(objext): $(srcdir)/xmalloc.c config.h $(INCDIR)/ansidecl.h \
@@ -312,15 +312,15 @@ Index: gcc-7-20161106/libiberty/Makefile.in
  	if [ x"$(PICFLAG)" != x ]; then \
  	  $(COMPILE.c) $(PICFLAG) $(srcdir)/xmalloc.c -o pic/$@; \
  	else true; fi
-@@ -1707,3 +1720,4 @@ $(CONFIGURED_OFILES): stamp-picdir stamp
+@@ -1719,3 +1732,4 @@ $(CONFIGURED_OFILES): stamp-picdir stamp
  	  $(COMPILE.c) $(PICFLAG) $(NOASANFLAG) $(srcdir)/xvasprintf.c -o noasan/$@; \
  	else true; fi
  	$(COMPILE.c) $(srcdir)/xvasprintf.c $(OUTPUT_OPTION)
 +
-Index: gcc-7-20161106/gcc/final.c
+Index: gcc-7-20170319/gcc/final.c
 ===================================================================
---- gcc-7-20161106.orig/gcc/final.c
-+++ gcc-7-20161106/gcc/final.c
+--- gcc-7-20170319.orig/gcc/final.c
++++ gcc-7-20170319/gcc/final.c
 @@ -46,6 +46,7 @@ along with GCC; see the file COPYING3.
  #define INCLUDE_ALGORITHM /* reverse */
  #include "system.h"
@@ -329,7 +329,7 @@ Index: gcc-7-20161106/gcc/final.c
  #include "backend.h"
  #include "target.h"
  #include "rtl.h"
-@@ -1502,22 +1503,11 @@ asm_str_count (const char *templ)
+@@ -1506,22 +1507,11 @@ asm_str_count (const char *templ)
    return count;
  }
  
@@ -355,7 +355,7 @@ Index: gcc-7-20161106/gcc/final.c
  
  /* Record a debug file prefix mapping.  ARG is the argument to
     -fdebug-prefix-map and must be of the form OLD=NEW.  */
-@@ -1525,23 +1515,19 @@ static debug_prefix_map *debug_prefix_ma
+@@ -1529,23 +1519,19 @@ static debug_prefix_map *debug_prefix_ma
  void
  add_debug_prefix_map (const char *arg)
  {
@@ -386,7 +386,7 @@ Index: gcc-7-20161106/gcc/final.c
  }
  
  /* Perform user-specified mapping of debug filename prefixes.  Return
-@@ -1550,22 +1536,13 @@ add_debug_prefix_map (const char *arg)
+@@ -1554,22 +1540,13 @@ add_debug_prefix_map (const char *arg)
  const char *
  remap_debug_filename (const char *filename)
  {
@@ -415,11 +415,11 @@ Index: gcc-7-20161106/gcc/final.c
  }
  
  /* Return true if DWARF2 debug info can be emitted for DECL.  */
-Index: gcc-7-20161106/gcc/doc/invoke.texi
+Index: gcc-7-20170319/gcc/doc/invoke.texi
 ===================================================================
---- gcc-7-20161106.orig/gcc/doc/invoke.texi
-+++ gcc-7-20161106/gcc/doc/invoke.texi
-@@ -26286,7 +26286,8 @@ recognize and translate multibyte charac
+--- gcc-7-20170319.orig/gcc/doc/invoke.texi
++++ gcc-7-20170319/gcc/doc/invoke.texi
+@@ -26638,7 +26638,8 @@ recognize and translate multibyte charac
  @item SOURCE_PREFIX_MAP
  @findex SOURCE_PREFIX_MAP
  If this variable is set, it specifies a mapping that is used to
@@ -429,10 +429,10 @@ Index: gcc-7-20161106/gcc/doc/invoke.texi
  embedded paths become reproducible, without having the unreproducible
  value be visible in other input sources---such as GCC command-line flags
  or standardised build-time environment variables like
-Index: gcc-7-20161106/gcc/c-family/c-common.c
+Index: gcc-7-20170319/gcc/c-family/c-common.c
 ===================================================================
---- gcc-7-20161106.orig/gcc/c-family/c-common.c
-+++ gcc-7-20161106/gcc/c-family/c-common.c
+--- gcc-7-20170319.orig/gcc/c-family/c-common.c
++++ gcc-7-20170319/gcc/c-family/c-common.c
 @@ -21,6 +21,7 @@ along with GCC; see the file COPYING3.
  
  #include "config.h"
@@ -441,7 +441,7 @@ Index: gcc-7-20161106/gcc/c-family/c-common.c
  #include "coretypes.h"
  #include "target.h"
  #include "function.h"
-@@ -7928,6 +7929,31 @@ cb_get_source_date_epoch (cpp_reader *pf
+@@ -8005,6 +8006,31 @@ cb_get_source_date_epoch (cpp_reader *pf
    return (time_t) epoch;
  }
  
@@ -473,11 +473,11 @@ Index: gcc-7-20161106/gcc/c-family/c-common.c
  /* Callback for libcpp for offering spelling suggestions for misspelled
     directives.  GOAL is an unrecognized string; CANDIDATES is a
     NULL-terminated array of candidate strings.  Return the closest
-Index: gcc-7-20161106/gcc/c-family/c-common.h
+Index: gcc-7-20170319/gcc/c-family/c-common.h
 ===================================================================
---- gcc-7-20161106.orig/gcc/c-family/c-common.h
-+++ gcc-7-20161106/gcc/c-family/c-common.h
-@@ -1075,6 +1075,11 @@ extern time_t cb_get_source_date_epoch (
+--- gcc-7-20170319.orig/gcc/c-family/c-common.h
++++ gcc-7-20170319/gcc/c-family/c-common.h
+@@ -1085,6 +1085,11 @@ extern time_t cb_get_source_date_epoch (
     __TIME__ can store.  */
  #define MAX_SOURCE_DATE_EPOCH HOST_WIDE_INT_C (253402300799)
  
@@ -489,10 +489,10 @@ Index: gcc-7-20161106/gcc/c-family/c-common.h
  /* Callback for libcpp for offering spelling suggestions for misspelled
     directives.  */
  extern const char *cb_get_suggestion (cpp_reader *, const char *,
-Index: gcc-7-20161106/gcc/c-family/c-lex.c
+Index: gcc-7-20170319/gcc/c-family/c-lex.c
 ===================================================================
---- gcc-7-20161106.orig/gcc/c-family/c-lex.c
-+++ gcc-7-20161106/gcc/c-family/c-lex.c
+--- gcc-7-20170319.orig/gcc/c-family/c-lex.c
++++ gcc-7-20170319/gcc/c-family/c-lex.c
 @@ -81,6 +81,7 @@ init_c_lex (void)
    cb->read_pch = c_common_read_pch;
    cb->has_attribute = c_common_has_attribute;
@@ -501,11 +501,11 @@ Index: gcc-7-20161106/gcc/c-family/c-lex.c
    cb->get_suggestion = cb_get_suggestion;
  
    /* Set the debug callbacks if we can use them.  */
-Index: gcc-7-20161106/libcpp/include/cpplib.h
+Index: gcc-7-20170319/libcpp/include/cpplib.h
 ===================================================================
---- gcc-7-20161106.orig/libcpp/include/cpplib.h
-+++ gcc-7-20161106/libcpp/include/cpplib.h
-@@ -603,6 +603,9 @@ struct cpp_callbacks
+--- gcc-7-20170319.orig/libcpp/include/cpplib.h
++++ gcc-7-20170319/libcpp/include/cpplib.h
+@@ -607,6 +607,9 @@ struct cpp_callbacks
    /* Callback to parse SOURCE_DATE_EPOCH from environment.  */
    time_t (*get_source_date_epoch) (cpp_reader *);
  
@@ -515,10 +515,10 @@ Index: gcc-7-20161106/libcpp/include/cpplib.h
    /* Callback for providing suggestions for misspelled directives.  */
    const char *(*get_suggestion) (cpp_reader *, const char *, const char *const *);
  };
-Index: gcc-7-20161106/libcpp/init.c
+Index: gcc-7-20170319/libcpp/init.c
 ===================================================================
---- gcc-7-20161106.orig/libcpp/init.c
-+++ gcc-7-20161106/libcpp/init.c
+--- gcc-7-20170319.orig/libcpp/init.c
++++ gcc-7-20170319/libcpp/init.c
 @@ -261,6 +261,9 @@ cpp_create_reader (enum c_lang lang, cpp
    /* Initialize source_date_epoch to -2 (not yet set).  */
    pfile->source_date_epoch = (time_t) -2;
@@ -529,10 +529,10 @@ Index: gcc-7-20161106/libcpp/init.c
    /* The expression parser stack.  */
    _cpp_expand_op_stack (pfile);
  
-Index: gcc-7-20161106/libcpp/internal.h
+Index: gcc-7-20170319/libcpp/internal.h
 ===================================================================
---- gcc-7-20161106.orig/libcpp/internal.h
-+++ gcc-7-20161106/libcpp/internal.h
+--- gcc-7-20170319.orig/libcpp/internal.h
++++ gcc-7-20170319/libcpp/internal.h
 @@ -507,6 +507,11 @@ struct cpp_reader
       set to -1 to disable it or to a non-negative value to enable it.  */
    time_t source_date_epoch;
@@ -545,10 +545,10 @@ Index: gcc-7-20161106/libcpp/internal.h
    /* EOF token, and a token forcing paste avoidance.  */
    cpp_token avoid_paste;
    cpp_token eof;
-Index: gcc-7-20161106/libcpp/macro.c
+Index: gcc-7-20170319/libcpp/macro.c
 ===================================================================
---- gcc-7-20161106.orig/libcpp/macro.c
-+++ gcc-7-20161106/libcpp/macro.c
+--- gcc-7-20170319.orig/libcpp/macro.c
++++ gcc-7-20170319/libcpp/macro.c
 @@ -26,6 +26,7 @@ along with this program; see the file CO
  #include "system.h"
  #include "cpplib.h"
@@ -598,10 +598,10 @@ Index: gcc-7-20161106/libcpp/macro.c
  	len = strlen (name);
  	buf = _cpp_unaligned_alloc (pfile, len * 2 + 3);
  	result = buf;
-Index: gcc-7-20161106/gcc/testsuite/gcc.dg/cpp/source_prefix_map-1.c
+Index: gcc-7-20170319/gcc/testsuite/gcc.dg/cpp/source_prefix_map-1.c
 ===================================================================
 --- /dev/null
-+++ gcc-7-20161106/gcc/testsuite/gcc.dg/cpp/source_prefix_map-1.c
++++ gcc-7-20170319/gcc/testsuite/gcc.dg/cpp/source_prefix_map-1.c
 @@ -0,0 +1,11 @@
 +/* __FILE__ should strip SOURCE_PREFIX_MAP if the latter is a prefix. */
 +/* { dg-do run } */
@@ -614,10 +614,10 @@ Index: gcc-7-20161106/gcc/testsuite/gcc.dg/cpp/source_prefix_map-1.c
 +    __builtin_abort ();
 +  return 0;
 +}
-Index: gcc-7-20161106/gcc/testsuite/gcc.dg/cpp/source_prefix_map-2.c
+Index: gcc-7-20170319/gcc/testsuite/gcc.dg/cpp/source_prefix_map-2.c
 ===================================================================
 --- /dev/null
-+++ gcc-7-20161106/gcc/testsuite/gcc.dg/cpp/source_prefix_map-2.c
++++ gcc-7-20170319/gcc/testsuite/gcc.dg/cpp/source_prefix_map-2.c
 @@ -0,0 +1,11 @@
 +/* __FILE__ should not be relative if SOURCE_PREFIX_MAP is not set, and gcc is
 +   asked to compile an absolute filename as is the case with this test.  */

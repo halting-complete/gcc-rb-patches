@@ -34,10 +34,10 @@ gcc/testsuite/ChangeLog:
 	* gcc.dg/cpp/source_date_epoch-4.c: New test.
 	* gcc.dg/cpp/source_date_epoch-5.c: New test.
 
-Index: gcc-7-20161106/libcpp/macro.c
+Index: gcc-7-20170319/libcpp/macro.c
 ===================================================================
---- gcc-7-20161106.orig/libcpp/macro.c
-+++ gcc-7-20161106/libcpp/macro.c
+--- gcc-7-20170319.orig/libcpp/macro.c
++++ gcc-7-20170319/libcpp/macro.c
 @@ -264,7 +264,30 @@ _cpp_builtin_macro_text (cpp_reader *pfi
  		struct tm *tb = NULL;
  		struct stat *st = _cpp_get_file_stat (file);
@@ -70,10 +70,10 @@ Index: gcc-7-20161106/libcpp/macro.c
  		if (tb)
  		  {
  		    char *str = asctime (tb);
-Index: gcc-7-20161106/gcc/doc/cppenv.texi
+Index: gcc-7-20170319/gcc/doc/cppenv.texi
 ===================================================================
---- gcc-7-20161106.orig/gcc/doc/cppenv.texi
-+++ gcc-7-20161106/gcc/doc/cppenv.texi
+--- gcc-7-20170319.orig/gcc/doc/cppenv.texi
++++ gcc-7-20170319/gcc/doc/cppenv.texi
 @@ -83,8 +83,9 @@ main input file is omitted.
  @item SOURCE_DATE_EPOCH
  If this variable is set, its value specifies a UNIX timestamp to be
@@ -86,10 +86,10 @@ Index: gcc-7-20161106/gcc/doc/cppenv.texi
  
  The value of @env{SOURCE_DATE_EPOCH} must be a UNIX timestamp,
  defined as the number of seconds (excluding leap seconds) since
-Index: gcc-7-20161106/gcc/testsuite/gcc.dg/cpp/source_date_epoch-4.c
+Index: gcc-7-20170319/gcc/testsuite/gcc.dg/cpp/source_date_epoch-4.c
 ===================================================================
 --- /dev/null
-+++ gcc-7-20161106/gcc/testsuite/gcc.dg/cpp/source_date_epoch-4.c
++++ gcc-7-20170319/gcc/testsuite/gcc.dg/cpp/source_date_epoch-4.c
 @@ -0,0 +1,13 @@
 +/* __TIMESTAMP__ should use SOURCE_DATE_EPOCH if the latter is older.  */
 +/* { dg-do run } */
@@ -104,10 +104,10 @@ Index: gcc-7-20161106/gcc/testsuite/gcc.dg/cpp/source_date_epoch-4.c
 +    __builtin_abort ();
 +  return 0;
 +}
-Index: gcc-7-20161106/gcc/testsuite/gcc.dg/cpp/source_date_epoch-5.c
+Index: gcc-7-20170319/gcc/testsuite/gcc.dg/cpp/source_date_epoch-5.c
 ===================================================================
 --- /dev/null
-+++ gcc-7-20161106/gcc/testsuite/gcc.dg/cpp/source_date_epoch-5.c
++++ gcc-7-20170319/gcc/testsuite/gcc.dg/cpp/source_date_epoch-5.c
 @@ -0,0 +1,13 @@
 +/* __TIMESTAMP__ should not use SOURCE_DATE_EPOCH if the latter is newer.  */
 +/* { dg-do run } */

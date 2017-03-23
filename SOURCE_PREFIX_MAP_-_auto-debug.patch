@@ -35,10 +35,10 @@ gcc/testsuite/ChangeLog:
 	* gcc.dg/debug/dwarf2/source_prefix_map-1.c: New test.
 	* gcc.dg/debug/dwarf2/source_prefix_map-2.c: New test.
 
-Index: gcc-7-20161106/gcc/opts-global.c
+Index: gcc-7-20170319/gcc/opts-global.c
 ===================================================================
---- gcc-7-20161106.orig/gcc/opts-global.c
-+++ gcc-7-20161106/gcc/opts-global.c
+--- gcc-7-20170319.orig/gcc/opts-global.c
++++ gcc-7-20170319/gcc/opts-global.c
 @@ -310,6 +310,21 @@ decode_options (struct gcc_options *opts
    finish_options (opts, opts_set, loc);
  }
@@ -70,11 +70,11 @@ Index: gcc-7-20161106/gcc/opts-global.c
    FOR_EACH_VEC_ELT (v, i, opt)
      {
        switch (opt->opt_index)
-Index: gcc-7-20161106/gcc/final.c
+Index: gcc-7-20170319/gcc/final.c
 ===================================================================
---- gcc-7-20161106.orig/gcc/final.c
-+++ gcc-7-20161106/gcc/final.c
-@@ -1531,7 +1531,7 @@ add_debug_prefix_map (const char *arg)
+--- gcc-7-20170319.orig/gcc/final.c
++++ gcc-7-20170319/gcc/final.c
+@@ -1535,7 +1535,7 @@ add_debug_prefix_map (const char *arg)
    p = strchr (arg, '=');
    if (!p)
      {
@@ -83,11 +83,11 @@ Index: gcc-7-20161106/gcc/final.c
        return;
      }
    map = XNEW (debug_prefix_map);
-Index: gcc-7-20161106/gcc/doc/invoke.texi
+Index: gcc-7-20170319/gcc/doc/invoke.texi
 ===================================================================
---- gcc-7-20161106.orig/gcc/doc/invoke.texi
-+++ gcc-7-20161106/gcc/doc/invoke.texi
-@@ -26282,6 +26282,25 @@ Recognize EUCJP characters.
+--- gcc-7-20170319.orig/gcc/doc/invoke.texi
++++ gcc-7-20170319/gcc/doc/invoke.texi
+@@ -26634,6 +26634,25 @@ Recognize EUCJP characters.
  If @env{LANG} is not defined, or if it has some other value, then the
  compiler uses @code{mblen} and @code{mbtowc} as defined by the default locale to
  recognize and translate multibyte characters.
@@ -113,10 +113,10 @@ Index: gcc-7-20161106/gcc/doc/invoke.texi
  @end table
  
  @noindent
-Index: gcc-7-20161106/gcc/testsuite/gcc.dg/debug/dwarf2/source_prefix_map-1.c
+Index: gcc-7-20170319/gcc/testsuite/gcc.dg/debug/dwarf2/source_prefix_map-1.c
 ===================================================================
 --- /dev/null
-+++ gcc-7-20161106/gcc/testsuite/gcc.dg/debug/dwarf2/source_prefix_map-1.c
++++ gcc-7-20170319/gcc/testsuite/gcc.dg/debug/dwarf2/source_prefix_map-1.c
 @@ -0,0 +1,9 @@
 +/* DW_AT_comp_dir should be relative if SOURCE_PREFIX_MAP is a prefix of it.  */
 +/* { dg-do compile } */
@@ -127,10 +127,10 @@ Index: gcc-7-20161106/gcc/testsuite/gcc.dg/debug/dwarf2/source_prefix_map-1.c
 +void func (void)
 +{
 +}
-Index: gcc-7-20161106/gcc/testsuite/gcc.dg/debug/dwarf2/source_prefix_map-2.c
+Index: gcc-7-20170319/gcc/testsuite/gcc.dg/debug/dwarf2/source_prefix_map-2.c
 ===================================================================
 --- /dev/null
-+++ gcc-7-20161106/gcc/testsuite/gcc.dg/debug/dwarf2/source_prefix_map-2.c
++++ gcc-7-20170319/gcc/testsuite/gcc.dg/debug/dwarf2/source_prefix_map-2.c
 @@ -0,0 +1,8 @@
 +/* DW_AT_comp_dir should be absolute if SOURCE_PREFIX_MAP is not set.  */
 +/* { dg-do compile } */

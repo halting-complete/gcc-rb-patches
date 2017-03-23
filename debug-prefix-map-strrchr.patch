@@ -31,11 +31,11 @@ gcc/ChangeLog:
 	* doc/invoke.texi (Environment Variables): Update SOURCE_PREFIX_MAP to
 	describe new parsing.
 
-Index: gcc-7-20161106/gcc/final.c
+Index: gcc-7-20170319/gcc/final.c
 ===================================================================
---- gcc-7-20161106.orig/gcc/final.c
-+++ gcc-7-20161106/gcc/final.c
-@@ -1528,7 +1528,7 @@ add_debug_prefix_map (const char *arg)
+--- gcc-7-20170319.orig/gcc/final.c
++++ gcc-7-20170319/gcc/final.c
+@@ -1532,7 +1532,7 @@ add_debug_prefix_map (const char *arg)
    debug_prefix_map *map;
    const char *p;
  
@@ -44,11 +44,11 @@ Index: gcc-7-20161106/gcc/final.c
    if (!p)
      {
        error ("invalid value %qs for debug-prefix-map", arg);
-Index: gcc-7-20161106/gcc/doc/invoke.texi
+Index: gcc-7-20170319/gcc/doc/invoke.texi
 ===================================================================
---- gcc-7-20161106.orig/gcc/doc/invoke.texi
-+++ gcc-7-20161106/gcc/doc/invoke.texi
-@@ -26295,8 +26295,8 @@ output by higher-level build processes.
+--- gcc-7-20170319.orig/gcc/doc/invoke.texi
++++ gcc-7-20170319/gcc/doc/invoke.texi
+@@ -26647,8 +26647,8 @@ output by higher-level build processes.
  
  The form and behaviour is similar to @option{-fdebug-prefix-map}.  That
  is, the value of @env{SOURCE_PREFIX_MAP} must be of the form
