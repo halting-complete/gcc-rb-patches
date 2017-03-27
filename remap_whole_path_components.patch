@@ -1,0 +1,62 @@
+Index: gcc-7-20170319/gcc/doc/invoke.texi
+===================================================================
+--- gcc-7-20170319.orig/gcc/doc/invoke.texi
++++ gcc-7-20170319/gcc/doc/invoke.texi
+@@ -26634,6 +26634,26 @@ Recognize EUCJP characters.
+ If @env{LANG} is not defined, or if it has some other value, then the
+ compiler uses @code{mblen} and @code{mbtowc} as defined by the default locale to
+ recognize and translate multibyte characters.
++
++@item BUILD_PATH_PREFIX_MAP
++@findex BUILD_PATH_PREFIX_MAP
++If this variable is set, it specifies an ordered map used to transform
++filepaths output in debugging symbols and expansions of the @code{__FILE__}
++macro.  This may be used to achieve fully reproducible output.  In the context
++of running GCC within a higher-level build tool, it is typically more reliable
++than setting command line arguments such as @option{-fdebug-prefix-map} or
++common environment variables such as @env{CFLAGS}, since the build tool may
++save these latter values into other output outside of GCC's control.
++
++The value is of the form
++@samp{@var{dst@r{[0]}}=@var{src@r{[0]}}:@var{dst@r{[1]}}=@var{src@r{[1]}}@r{@dots{}}}.
++If any @var{dst@r{[}i@r{]}} or @var{src@r{[}i@r{]}} contains @code{%}, @code{=}
++or @code{:} characters, they must be replaced with @code{%#}, @code{%+}, and
++@code{%.} respectively.
++
++Whenever GCC emits a filepath that starts with a whole path component matching
++@var{src@r{[}i@r{]}} for some @var{i}, with rightmost @var{i} taking priority,
++the matching part is replaced with @var{dst@r{[}i@r{]}} in the final output.
+ @end table
+ 
+ @noindent
+Index: gcc-7-20170319/libiberty/prefix-map.c
+===================================================================
+--- gcc-7-20170319.orig/libiberty/prefix-map.c
++++ gcc-7-20170319/libiberty/prefix-map.c
+@@ -106,14 +106,23 @@ remap_prefix_to (const char *old_name, c
+ {
+   struct prefix_map *map;
+   const char *name;
++  int len;
+ 
+   for (map = map_head; map; map = map->next)
+-    if (filename_ncmp (old_name, map->old_prefix, map->old_len) == 0)
+-      break;
++    {
++      len = map->old_len;
++      /* Ignore trailing path separators at the end of old_prefix */
++      while (len > 0 && IS_DIR_SEPARATOR (map->old_prefix[len-1])) len--;
++      /* Check if old_name matches old_prefix at a path component boundary */
++      if (! filename_ncmp (old_name, map->old_prefix, len)
++	  && (IS_DIR_SEPARATOR (old_name[len])
++	      || old_name[len] == '\0'))
++	break;
++    }
+   if (!map)
+     return old_name;
+ 
+-  name = old_name + map->old_len;
++  name = old_name + len;
+   memcpy (new_name, map->new_prefix, map->new_len);
+   memcpy (new_name + map->new_len, name, strlen (name) + 1);
+   return new_name;

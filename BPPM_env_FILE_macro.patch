@@ -1,0 +1,185 @@
+Index: gcc-7-20170319/gcc/c-family/c-common.c
+===================================================================
+--- gcc-7-20170319.orig/gcc/c-family/c-common.c
++++ gcc-7-20170319/gcc/c-family/c-common.c
+@@ -21,6 +21,7 @@ along with GCC; see the file COPYING3.
+ 
+ #include "config.h"
+ #include "system.h"
++#include "prefix-map.h"
+ #include "coretypes.h"
+ #include "target.h"
+ #include "function.h"
+@@ -8005,6 +8006,27 @@ cb_get_source_date_epoch (cpp_reader *pf
+   return (time_t) epoch;
+ }
+ 
++/* Read BUILD_PATH_PREFIX_MAP from environment to have deterministic relative
++   paths to replace embedded absolute paths to get reproducible results.
++   Returns NULL if BUILD_PATH_PREFIX_MAP is badly formed.  */
++
++prefix_maps *
++cb_get_build_path_prefix_map (cpp_reader *pfile ATTRIBUTE_UNUSED)
++{
++  prefix_maps *map = XNEW (prefix_maps);
++  memset (map, 0, sizeof (prefix_maps));
++
++  const char *arg = getenv ("BUILD_PATH_PREFIX_MAP");
++  if (!arg || parse_prefix_maps (arg, map))
++    return map;
++
++  free (map);
++  error_at (input_location, "environment variable BUILD_PATH_PREFIX_MAP is "
++	    "not well formed; see the GCC documentation for more details.");
++
++  return NULL;
++}
++
+ /* Callback for libcpp for offering spelling suggestions for misspelled
+    directives.  GOAL is an unrecognized string; CANDIDATES is a
+    NULL-terminated array of candidate strings.  Return the closest
+Index: gcc-7-20170319/gcc/c-family/c-common.h
+===================================================================
+--- gcc-7-20170319.orig/gcc/c-family/c-common.h
++++ gcc-7-20170319/gcc/c-family/c-common.h
+@@ -1085,6 +1085,11 @@ extern time_t cb_get_source_date_epoch (
+    __TIME__ can store.  */
+ #define MAX_SOURCE_DATE_EPOCH HOST_WIDE_INT_C (253402300799)
+ 
++/* Read BUILD_PATH_PREFIX_MAP from environment to have deterministic relative
++   paths to replace embedded absolute paths to get reproducible results.
++   Returns NULL if BUILD_PATH_PREFIX_MAP is badly formed.  */
++extern prefix_maps *cb_get_build_path_prefix_map (cpp_reader *pfile);
++
+ /* Callback for libcpp for offering spelling suggestions for misspelled
+    directives.  */
+ extern const char *cb_get_suggestion (cpp_reader *, const char *,
+Index: gcc-7-20170319/gcc/c-family/c-lex.c
+===================================================================
+--- gcc-7-20170319.orig/gcc/c-family/c-lex.c
++++ gcc-7-20170319/gcc/c-family/c-lex.c
+@@ -81,6 +81,7 @@ init_c_lex (void)
+   cb->read_pch = c_common_read_pch;
+   cb->has_attribute = c_common_has_attribute;
+   cb->get_source_date_epoch = cb_get_source_date_epoch;
++  cb->get_build_path_prefix_map = cb_get_build_path_prefix_map;
+   cb->get_suggestion = cb_get_suggestion;
+ 
+   /* Set the debug callbacks if we can use them.  */
+Index: gcc-7-20170319/libcpp/include/cpplib.h
+===================================================================
+--- gcc-7-20170319.orig/libcpp/include/cpplib.h
++++ gcc-7-20170319/libcpp/include/cpplib.h
+@@ -607,6 +607,9 @@ struct cpp_callbacks
+   /* Callback to parse SOURCE_DATE_EPOCH from environment.  */
+   time_t (*get_source_date_epoch) (cpp_reader *);
+ 
++  /* Callback to parse BUILD_PATH_PREFIX_MAP from environment.  */
++  struct prefix_maps *(*get_build_path_prefix_map) (cpp_reader *);
++
+   /* Callback for providing suggestions for misspelled directives.  */
+   const char *(*get_suggestion) (cpp_reader *, const char *, const char *const *);
+ };
+Index: gcc-7-20170319/libcpp/init.c
+===================================================================
+--- gcc-7-20170319.orig/libcpp/init.c
++++ gcc-7-20170319/libcpp/init.c
+@@ -261,6 +261,9 @@ cpp_create_reader (enum c_lang lang, cpp
+   /* Initialize source_date_epoch to -2 (not yet set).  */
+   pfile->source_date_epoch = (time_t) -2;
+ 
++  /* Initialize build_path_prefix_map to NULL (not yet set).  */
++  pfile->build_path_prefix_map = NULL;
++
+   /* The expression parser stack.  */
+   _cpp_expand_op_stack (pfile);
+ 
+Index: gcc-7-20170319/libcpp/internal.h
+===================================================================
+--- gcc-7-20170319.orig/libcpp/internal.h
++++ gcc-7-20170319/libcpp/internal.h
+@@ -507,6 +507,11 @@ struct cpp_reader
+      set to -1 to disable it or to a non-negative value to enable it.  */
+   time_t source_date_epoch;
+ 
++  /* Externally set prefix-map to transform absolute paths, useful for
++     reproducibility.  It should be initialized to NULL (not yet set or
++     disabled) or to a `struct prefix_map` value to enable it.  */
++  struct prefix_maps *build_path_prefix_map;
++
+   /* EOF token, and a token forcing paste avoidance.  */
+   cpp_token avoid_paste;
+   cpp_token eof;
+Index: gcc-7-20170319/libcpp/macro.c
+===================================================================
+--- gcc-7-20170319.orig/libcpp/macro.c
++++ gcc-7-20170319/libcpp/macro.c
+@@ -26,6 +26,7 @@ along with this program; see the file CO
+ #include "system.h"
+ #include "cpplib.h"
+ #include "internal.h"
++#include "prefix-map.h"
+ 
+ typedef struct macro_arg macro_arg;
+ /* This structure represents the tokens of a macro argument.  These
+@@ -291,7 +292,16 @@ _cpp_builtin_macro_text (cpp_reader *pfi
+ 	unsigned int len;
+ 	const char *name;
+ 	uchar *buf;
++	prefix_maps *map = pfile->build_path_prefix_map;
+ 	
++	/* Set a prefix-map for __FILE__ if BUILD_PATH_PREFIX_MAP is defined.  */
++	if (map == NULL && pfile->cb.get_build_path_prefix_map != NULL)
++	  {
++	    map = pfile->build_path_prefix_map = pfile->cb.get_build_path_prefix_map (pfile);
++	    if (map == NULL)
++	      abort ();
++	  }
++
+ 	if (node->value.builtin == BT_FILE)
+ 	  name = linemap_get_expansion_filename (pfile->line_table,
+ 						 pfile->line_table->highest_line);
+@@ -301,6 +311,11 @@ _cpp_builtin_macro_text (cpp_reader *pfi
+ 	    if (!name)
+ 	      abort ();
+ 	  }
++
++	/* Apply the prefix-map for deterministic path output.  */
++	if (map != NULL && map->head != NULL)
++	  name = remap_prefix_alloca (name, map);
++
+ 	len = strlen (name);
+ 	buf = _cpp_unaligned_alloc (pfile, len * 2 + 3);
+ 	result = buf;
+Index: gcc-7-20170319/gcc/testsuite/gcc.dg/cpp/build_path_prefix_map-1.c
+===================================================================
+--- /dev/null
++++ gcc-7-20170319/gcc/testsuite/gcc.dg/cpp/build_path_prefix_map-1.c
+@@ -0,0 +1,11 @@
++/* __FILE__ should strip BUILD_PATH_PREFIX_MAP if the latter is a prefix. */
++/* { dg-do run } */
++/* { dg-set-compiler-env-var BUILD_PATH_PREFIX_MAP "MACROTEST=$srcdir" } */
++
++int
++main ()
++{
++  if (__builtin_strcmp (__FILE__, "MACROTEST/gcc.dg/cpp/build_path_prefix_map-1.c") != 0)
++    __builtin_abort ();
++  return 0;
++}
+Index: gcc-7-20170319/gcc/testsuite/gcc.dg/cpp/build_path_prefix_map-2.c
+===================================================================
+--- /dev/null
++++ gcc-7-20170319/gcc/testsuite/gcc.dg/cpp/build_path_prefix_map-2.c
+@@ -0,0 +1,11 @@
++/* __FILE__ should not be relative if BUILD_PATH_PREFIX_MAP is not set, and gcc is
++   asked to compile an absolute filename as is the case with this test.  */
++/* { dg-do run } */
++
++int
++main ()
++{
++  if (__builtin_strcmp (__FILE__, "./gcc.dg/cpp/build_path_prefix_map-1.c") == 0)
++    __builtin_abort ();
++  return 0;
++}
