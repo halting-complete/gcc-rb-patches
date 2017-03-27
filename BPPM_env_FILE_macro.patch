@@ -1,3 +1,51 @@
+Subject: [PATCH 2/3] Use BUILD_PATH_PREFIX_MAP envvar to transform __FILE__
+
+Use the BUILD_PATH_PREFIX_MAP environment variable when expanding the __FILE__
+macro, in the same way that debug-prefix-map works for debugging symbol paths.
+
+This patch follows similar lines to the earlier patch for SOURCE_DATE_EPOCH.
+Specifically, we read the environment variable not in libcpp but via a hook
+which has an implementation defined in gcc/c-family.  However, to achieve this
+is more complex than the earlier patch: we need to share the prefix_map data
+structure and associated functions between libcpp and c-family.  Therefore, we
+need to move these to libiberty.  (For comparison, the SOURCE_DATE_EPOCH patch
+did not need this because time_t et. al. are in the standard C library.)
+
+Acknowledgements
+----------------
+
+Dhole <dhole@openmailbox.org> who wrote the earlier patch for SOURCE_DATE_EPOCH
+which saved me a lot of time on figuring out what to edit.
+
+ChangeLogs
+----------
+
+gcc/c-family/ChangeLog:
+
+2017-03-27  Ximin Luo  <infinity0@pwned.gg>
+
+	* c-common.c (cb_get_build_path_prefix_map): Define new call target.
+	* c-common.h (cb_get_build_path_prefix_map): Declare call target.
+	* c-lex.c (init_c_lex): Set the get_build_path_prefix_map callback.
+
+libcpp/ChangeLog:
+
+2017-03-27  Ximin Luo  <infinity0@pwned.gg>
+
+	* include/cpplib.h (cpp_callbacks): Add get_build_path_prefix_map
+	callback.
+	* init.c (cpp_create_reader): Initialise build_path_prefix_map field.
+	* internal.h (cpp_reader): Add new field build_path_prefix_map.
+	* macro.c (_cpp_builtin_macro_text): Set the build_path_prefix_map
+	field if unset and apply it when expanding __FILE__ macros.
+
+gcc/testsuite/ChangeLog:
+
+2017-03-27  Ximin Luo  <infinity0@pwned.gg>
+
+	* gcc.dg/cpp/build_path_prefix_map-1.c: New test.
+	* gcc.dg/cpp/build_path_prefix_map-2.c: New test.
+
 Index: gcc-7-20170319/gcc/c-family/c-common.c
 ===================================================================
 --- gcc-7-20170319.orig/gcc/c-family/c-common.c

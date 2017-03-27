@@ -1,3 +1,43 @@
+Subject: [PATCH 3/3] When remapping paths, only match whole path components
+
+Change the remapping algorithm so that each old_prefix only matches paths that
+have old_prefix as a whole path component prefix.  (A whole path component is a
+part of a path that begins and ends at a directory separator or at either end
+of the path string.)
+
+This remapping algorithm is more predictable than the old algorithm, because
+there is no chance of mappings for one directory interfering with mappings for
+other directories.  It contains less corner cases and is therefore nicer for
+clients to use.  For these reasons, in our BUILD_PATH_PREFIX_MAP specification
+we recommend this algorithm, and it would be good for GCC to follow suit.
+
+This does technically break backwards compatibility but I don't think anyone
+would be reasonably depending on the corner cases of the previous algorithm,
+which are surprising and counterintuitive.
+
+Acknowledgements
+----------------
+
+Discussions with Michael Woerister and other members of the Rust compiler team
+on Github, and discussions with Daniel Shahaf on the rb-general@ mailing list
+on lists.reproducible-builds.org.
+
+ChangeLogs
+----------
+
+gcc/ChangeLog:
+
+2017-03-27  Ximin Luo  <infinity0@pwned.gg>
+
+	* doc/invoke.texi (Environment Variables): Document form and behaviour
+	of BUILD_PATH_PREFIX_MAP.
+
+libiberty/ChangeLog:
+
+2017-03-27  Ximin Luo  <infinity0@pwned.gg>
+
+	* prefix-map.c: When remapping paths, only match whole path components.
+
 Index: gcc-7-20170319/gcc/doc/invoke.texi
 ===================================================================
 --- gcc-7-20170319.orig/gcc/doc/invoke.texi
