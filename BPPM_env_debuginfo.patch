@@ -60,10 +60,10 @@ Index: gcc-7-20170319/include/prefix-map.h
 ===================================================================
 --- /dev/null
 +++ gcc-7-20170319/include/prefix-map.h
-@@ -0,0 +1,101 @@
+@@ -0,0 +1,104 @@
 +/* Declarations for manipulating filename prefixes.
 +
-+   Copyright (C) 2016 Free Software Foundation, Inc.
++   Copyright (C) 2017 Free Software Foundation, Inc.
 +
 +   This program is free software; you can redistribute it and/or modify
 +   it under the terms of the GNU General Public License as published by
@@ -110,9 +110,9 @@ Index: gcc-7-20170319/include/prefix-map.h
 +
 +/* Remap a filename.
 +
-+   Returns old_name unchanged if there was no remapping, otherwise new_name.
++   Returns OLD_NAME unchanged if there was no remapping, otherwise NEW_NAME.
 +
-+   No allocations are performed; it assumes that new_name has enough space for
++   No allocations are performed; it assumes that NEW_NAME has enough space for
 +   any potential remapped value.  */
 +const char *
 +remap_prefix_to (const char *old_name, char *new_name,
@@ -121,24 +121,27 @@ Index: gcc-7-20170319/include/prefix-map.h
 +
 +/* Remap a filename.
 +
-+   Returns old_name unchanged if there was no remapping, otherwise returns a
++   Returns OLD_NAME unchanged if there was no remapping, otherwise returns a
 +   stack-allocated pointer to the newly-remapped filename.  */
-+#define remap_prefix_alloca(filename, maps) \
-+  remap_prefix_to ((filename), \
-+		   (char *) alloca (strlen ((filename)) + (maps)->max_replace + 1), \
++#define remap_prefix_alloca(old_name, maps) \
++  remap_prefix_to ((old_name), \
++		   (char *) alloca (strlen ((old_name)) + \
++				    (maps)->max_replace + 1), \
 +		   (maps)->head)
 +
 +
 +/* Remap a filename.
 +
-+   Returns old_name unchanged if there was no remapping, otherwise returns a
++   Returns OLD_NAME unchanged if there was no remapping, otherwise returns a
 +   pointer to newly-allocated memory for the remapped filename.  The caller is
 +   then responsible for freeing it.
 +
-+   That is, if and only if filename != return-value, the caller is responsible
++   That is, if and only if OLD_NAME != return-value, the caller is responsible
 +   for freeing return-value.  The owner of filename remains unchanged.  */
 +const char *
-+remap_prefix_alloc (const char *filename, struct prefix_maps *maps, void *(*alloc)(size_t size));
++remap_prefix_alloc (const char *old_name,
++		    struct prefix_maps *maps,
++		    void *(*alloc)(size_t size));
 +
 +
 +/* Parse prefix-maps according to the BUILD_PATH_PREFIX_MAP standard.
@@ -245,10 +248,10 @@ Index: gcc-7-20170319/libiberty/prefix-map.c
 ===================================================================
 --- /dev/null
 +++ gcc-7-20170319/libiberty/prefix-map.c
-@@ -0,0 +1,225 @@
+@@ -0,0 +1,236 @@
 +/* Definitions for manipulating filename prefixes.
 +
-+   Copyright (C) 2016 Free Software Foundation, Inc.
++   Copyright (C) 2017 Free Software Foundation, Inc.
 +
 +   This program is free software; you can redistribute it and/or modify
 +   it under the terms of the GNU General Public License as published by
@@ -322,16 +325,18 @@ Index: gcc-7-20170319/libiberty/prefix-map.c
 +  return 0;
 +}
 +
-+/* Clear all mappings.
++/* Rewind a prefix map.
 +
-+   All child structs of [maps] are freed, but it itself is not freed.  */
++   Everything up to the given OLD_HEAD is freed, and the fields of MAPS are
++   replaced with OLD_HEAD and OLD_REPLACE.  */
 +void
-+clear_prefix_maps (struct prefix_maps *maps)
++rewind_prefix_maps (struct prefix_maps *maps,
++		    struct prefix_map *old_head, size_t old_replace)
 +{
 +  struct prefix_map *map;
 +  struct prefix_map *next;
 +
-+  for (map = maps->head; map; map = next)
++  for (map = maps->head; map != old_head; map = next)
 +    {
 +      free ((void *) map->old_prefix);
 +      free ((void *) map->new_prefix);
@@ -339,14 +344,15 @@ Index: gcc-7-20170319/libiberty/prefix-map.c
 +      free (map);
 +    }
 +
-+  maps->max_replace = 0;
++  maps->head = old_head;
++  maps->max_replace = old_replace;
 +}
 +
 +/* Remap a filename.
 +
-+   Returns old_name unchanged if there was no remapping, otherwise new_name.
++   Returns OLD_NAME unchanged if there was no remapping, otherwise NEW_NAME.
 +
-+   No allocations are performed; it assumes that new_name has enough space for
++   No allocations are performed; it assumes that NEW_NAME has enough space for
 +   any potential remapped value.  */
 +const char *
 +remap_prefix_to (const char *old_name, char *new_name,
@@ -370,19 +376,21 @@ Index: gcc-7-20170319/libiberty/prefix-map.c
 +
 +/* Remap a filename.
 +
-+   Returns old_name unchanged if there was no remapping, otherwise returns a
++   Returns OLD_NAME unchanged if there was no remapping, otherwise returns a
 +   pointer to newly-allocated memory for the remapped filename.  The caller is
 +   then responsible for freeing it.
 +
-+   That is, if and only if filename != return-value, the caller is responsible
++   That is, if and only if OLD_NAME != return-value, the caller is responsible
 +   for freeing return-value.  The owner of filename remains unchanged.  */
 +const char *
-+remap_prefix_alloc (const char *filename, struct prefix_maps *maps, void *(*alloc)(size_t size))
++remap_prefix_alloc (const char *old_name,
++		    struct prefix_maps *maps,
++		    void *(*alloc)(size_t size))
 +{
-+  const char *name = remap_prefix_alloca (filename, maps);
++  const char *name = remap_prefix_alloca (old_name, maps);
 +
-+  if (name == filename)
-+    return filename;
++  if (name == old_name)
++    return old_name;
 +
 +  size_t len = strlen (name) + 1;
 +  return (char *) memcpy (alloc (len), name, len);
@@ -455,6 +463,9 @@ Index: gcc-7-20170319/libiberty/prefix-map.c
 +int
 +parse_prefix_maps (const char *arg, struct prefix_maps *maps)
 +{
++  struct prefix_map *old_head = maps->head;
++  size_t old_replace = maps->max_replace;
++
 +  size_t len = strlen (arg);
 +  char *copy = (char *) alloca (len + 1);
 +  memcpy (copy, arg, len + 1); // strtok modifies the string so we have to copy it
@@ -464,7 +475,10 @@ Index: gcc-7-20170319/libiberty/prefix-map.c
 +  while (tok != NULL)
 +    {
 +      if (!parse_prefix_map (tok, maps))
-+	return 0;
++	{
++	  rewind_prefix_maps (maps, old_head, old_replace);
++	  return 0;
++	}
 +
 +      tok = strtok_r (NULL, sep, &end);
 +    }

@@ -152,7 +152,7 @@ Index: gcc-7-20170319/libcpp/internal.h
  
 +  /* Externally set prefix-map to transform absolute paths, useful for
 +     reproducibility.  It should be initialized to NULL (not yet set or
-+     disabled) or to a `struct prefix_map` value to enable it.  */
++     disabled) or to a `struct prefix_maps` value to enable it.  */
 +  struct prefix_maps *build_path_prefix_map;
 +
    /* EOF token, and a token forcing paste avoidance.  */

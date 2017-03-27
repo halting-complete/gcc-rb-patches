@@ -73,7 +73,7 @@ Index: gcc-7-20170319/libiberty/prefix-map.c
 ===================================================================
 --- gcc-7-20170319.orig/libiberty/prefix-map.c
 +++ gcc-7-20170319/libiberty/prefix-map.c
-@@ -106,14 +106,23 @@ remap_prefix_to (const char *old_name, c
+@@ -109,14 +109,23 @@ remap_prefix_to (const char *old_name, c
  {
    struct prefix_map *map;
    const char *name;
