@@ -1,0 +1,61 @@
+Subject: [PATCH] Generate reproducible output independently of the build-path
+To: GCC Patches <gcc-patches@gcc.gnu.org>
+Cc: Ximin Luo <infinity0@pwned.gg>
+
+(Please keep me on CC, I am not subscribed)
+
+Background
+==========
+
+Previous background is here: https://gcc.gnu.org/ml/gcc-patches/2016-11/msg00182.html
+
+Upon further discussion we decided to rename the environment variable to
+BUILD_PATH_PREFIX_MAP and to add support for multiple mappings. We have also
+prepared a specification that describes all of this in detail, so that other
+projects can be confident that they are all interoperable:
+
+https://reproducible-builds.org/specs/build-path-prefix-map/
+
+The specification is currently in DRAFT status, awaiting some final feedback,
+including what the GCC maintainers think about it.
+
+Proposal
+========
+
+This patch series adds a new environment variable BUILD_PATH_PREFIX_MAP. When
+this is set, GCC will treat this as extra implicit "-fdebug-prefix-map=$value"
+command-line arguments that precede any explicit ones. This makes the final
+binary output reproducible, and also hides the unreproducible value (the source
+path prefixes) from CFLAGS et. al. which many build tools (understandably)
+embed as-is into their build output.
+
+This environment variable also acts on the __FILE__ macro, mapping it in the
+same way that debug-prefix-map works for debug symbols. We have seen that
+__FILE__ is also a very large source of unreproducibility, and is represented
+quite heavily in the 3k+ figure given earlier.
+
+Finally, we tweak the mapping algorithm so that it applies only to whole path
+components when matching prefixes. This algorithm contains fewer corner cases
+and it is easier for users to figure out how to set the mapping appropriately.
+
+More details are given in the headers of the patch files themselves.
+
+Testing
+=======
+
+I've tested these patches on a Debian testing/unstable x86_64-linux-gnu system.
+So far I've only run the new tests that this patch adds, on a disable-bootstrap
+build. I will do a full bootstrap and run the full testsuite over the next few
+days, both with and without this patch, and report back.
+
+Copyright disclaimer
+====================
+
+I dedicate these patches to the public domain by waiving all of my rights to
+the work worldwide under copyright law, including all related and neighboring
+rights, to the extent allowed by law.
+
+See https://creativecommons.org/publicdomain/zero/1.0/legalcode for full text.
+
+Please let me know if the above is insufficient and I will be happy to sign any
+relevant forms.
