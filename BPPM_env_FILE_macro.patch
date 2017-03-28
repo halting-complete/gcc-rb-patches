@@ -58,7 +58,7 @@ Index: gcc-7-20170319/gcc/c-family/c-common.c
  #include "coretypes.h"
  #include "target.h"
  #include "function.h"
-@@ -8005,6 +8006,27 @@ cb_get_source_date_epoch (cpp_reader *pf
+@@ -8005,6 +8006,25 @@ cb_get_source_date_epoch (cpp_reader *pf
    return (time_t) epoch;
  }
  
@@ -66,20 +66,18 @@ Index: gcc-7-20170319/gcc/c-family/c-common.c
 +   paths to replace embedded absolute paths to get reproducible results.
 +   Returns NULL if BUILD_PATH_PREFIX_MAP is badly formed.  */
 +
-+prefix_maps *
++prefix_map **
 +cb_get_build_path_prefix_map (cpp_reader *pfile ATTRIBUTE_UNUSED)
 +{
-+  prefix_maps *map = XNEW (prefix_maps);
-+  memset (map, 0, sizeof (prefix_maps));
++  prefix_map **map = XCNEW (prefix_map *);
 +
 +  const char *arg = getenv ("BUILD_PATH_PREFIX_MAP");
-+  if (!arg || parse_prefix_maps (arg, map))
++  if (!arg || prefix_map_parse (map, arg))
 +    return map;
 +
 +  free (map);
 +  error_at (input_location, "environment variable BUILD_PATH_PREFIX_MAP is "
 +	    "not well formed; see the GCC documentation for more details.");
-+
 +  return NULL;
 +}
 +
@@ -97,7 +95,7 @@ Index: gcc-7-20170319/gcc/c-family/c-common.h
 +/* Read BUILD_PATH_PREFIX_MAP from environment to have deterministic relative
 +   paths to replace embedded absolute paths to get reproducible results.
 +   Returns NULL if BUILD_PATH_PREFIX_MAP is badly formed.  */
-+extern prefix_maps *cb_get_build_path_prefix_map (cpp_reader *pfile);
++extern prefix_map **cb_get_build_path_prefix_map (cpp_reader *pfile);
 +
  /* Callback for libcpp for offering spelling suggestions for misspelled
     directives.  */
@@ -123,7 +121,7 @@ Index: gcc-7-20170319/libcpp/include/cpplib.h
    time_t (*get_source_date_epoch) (cpp_reader *);
  
 +  /* Callback to parse BUILD_PATH_PREFIX_MAP from environment.  */
-+  struct prefix_maps *(*get_build_path_prefix_map) (cpp_reader *);
++  struct prefix_map **(*get_build_path_prefix_map) (cpp_reader *);
 +
    /* Callback for providing suggestions for misspelled directives.  */
    const char *(*get_suggestion) (cpp_reader *, const char *, const char *const *);
@@ -152,8 +150,8 @@ Index: gcc-7-20170319/libcpp/internal.h
  
 +  /* Externally set prefix-map to transform absolute paths, useful for
 +     reproducibility.  It should be initialized to NULL (not yet set or
-+     disabled) or to a `struct prefix_maps` value to enable it.  */
-+  struct prefix_maps *build_path_prefix_map;
++     disabled) or to a `struct prefix_map` double pointer to enable it.  */
++  struct prefix_map **build_path_prefix_map;
 +
    /* EOF token, and a token forcing paste avoidance.  */
    cpp_token avoid_paste;
@@ -170,31 +168,32 @@ Index: gcc-7-20170319/libcpp/macro.c
  
  typedef struct macro_arg macro_arg;
  /* This structure represents the tokens of a macro argument.  These
-@@ -291,7 +292,16 @@ _cpp_builtin_macro_text (cpp_reader *pfi
+@@ -291,7 +292,17 @@ _cpp_builtin_macro_text (cpp_reader *pfi
  	unsigned int len;
  	const char *name;
  	uchar *buf;
-+	prefix_maps *map = pfile->build_path_prefix_map;
++	prefix_map **map = pfile->build_path_prefix_map;
  	
 +	/* Set a prefix-map for __FILE__ if BUILD_PATH_PREFIX_MAP is defined.  */
 +	if (map == NULL && pfile->cb.get_build_path_prefix_map != NULL)
 +	  {
-+	    map = pfile->build_path_prefix_map = pfile->cb.get_build_path_prefix_map (pfile);
++	    map = pfile->cb.get_build_path_prefix_map (pfile);
 +	    if (map == NULL)
 +	      abort ();
++	    pfile->build_path_prefix_map = map;
 +	  }
 +
  	if (node->value.builtin == BT_FILE)
  	  name = linemap_get_expansion_filename (pfile->line_table,
  						 pfile->line_table->highest_line);
-@@ -301,6 +311,11 @@ _cpp_builtin_macro_text (cpp_reader *pfi
+@@ -301,6 +312,11 @@ _cpp_builtin_macro_text (cpp_reader *pfi
  	    if (!name)
  	      abort ();
  	  }
 +
 +	/* Apply the prefix-map for deterministic path output.  */
-+	if (map != NULL && map->head != NULL)
-+	  name = remap_prefix_alloca (name, map);
++	if (map != NULL)
++	  name = prefix_map_remap_alloca (*map, name);
 +
  	len = strlen (name);
  	buf = _cpp_unaligned_alloc (pfile, len * 2 + 3);

@@ -60,7 +60,7 @@ Index: gcc-7-20170319/include/prefix-map.h
 ===================================================================
 --- /dev/null
 +++ gcc-7-20170319/include/prefix-map.h
-@@ -0,0 +1,104 @@
+@@ -0,0 +1,108 @@
 +/* Declarations for manipulating filename prefixes.
 +
 +   Copyright (C) 2017 Free Software Foundation, Inc.
@@ -101,47 +101,51 @@ Index: gcc-7-20170319/include/prefix-map.h
 +  struct prefix_map *next;
 +};
 +
-+struct prefix_maps
-+{
-+  struct prefix_map *head;
-+  size_t max_replace;
-+};
 +
++/* Find a mapping suitable for the given OLD_NAME in the linked list MAP.\
++
++   If a mapping is found, writes a pointer to the non-matching suffix part of
++   OLD_NAME in SUFFIX, and its length in SUF_LEN.
++
++   Returns NULL if there was no suitable mapping.  */
++struct prefix_map *
++prefix_map_find (struct prefix_map *map, const char *old_name,
++		 const char **suffix, size_t *suf_len);
++
++/* Prepend a prefix map before a given SUFFIX.
++
++   The remapped name is written to NEW_NAME and returned as a const pointer. No
++   allocations are performed; the caller must ensure it can hold at least
++   MAP->NEW_LEN + SUF_LEN + 1 characters.  */
++const char *
++prefix_map_prepend (struct prefix_map *map, char *new_name,
++		    const char *suffix, size_t suf_len);
 +
 +/* Remap a filename.
 +
-+   Returns OLD_NAME unchanged if there was no remapping, otherwise NEW_NAME.
-+
-+   No allocations are performed; it assumes that NEW_NAME has enough space for
-+   any potential remapped value.  */
-+const char *
-+remap_prefix_to (const char *old_name, char *new_name,
-+		 struct prefix_map *map_head);
-+
++   Returns OLD_NAME unchanged if there was no remapping, otherwise returns a
++   pointer to newly-allocated memory for the remapped filename.  The memory is
++   allocated by the given ALLOC function, which also determines who is
++   responsible for freeing it.  */
++#define prefix_map_remap_alloc_(map_head, old_name, alloc)		       \
++  __extension__								       \
++  ({									       \
++    const char *__suffix;						       \
++    size_t __suf_len;							       \
++    struct prefix_map *__map;						       \
++    (__map = prefix_map_find ((map_head), (old_name), &__suffix, &__suf_len))  \
++      ? prefix_map_prepend (__map,					       \
++			    (char *) alloc (__map->new_len + __suf_len + 1),   \
++			    __suffix, __suf_len)			       \
++      : (old_name);							       \
++  })
 +
 +/* Remap a filename.
 +
 +   Returns OLD_NAME unchanged if there was no remapping, otherwise returns a
 +   stack-allocated pointer to the newly-remapped filename.  */
-+#define remap_prefix_alloca(old_name, maps) \
-+  remap_prefix_to ((old_name), \
-+		   (char *) alloca (strlen ((old_name)) + \
-+				    (maps)->max_replace + 1), \
-+		   (maps)->head)
-+
-+
-+/* Remap a filename.
-+
-+   Returns OLD_NAME unchanged if there was no remapping, otherwise returns a
-+   pointer to newly-allocated memory for the remapped filename.  The caller is
-+   then responsible for freeing it.
-+
-+   That is, if and only if OLD_NAME != return-value, the caller is responsible
-+   for freeing return-value.  The owner of filename remains unchanged.  */
-+const char *
-+remap_prefix_alloc (const char *old_name,
-+		    struct prefix_maps *maps,
-+		    void *(*alloc)(size_t size));
++#define prefix_map_remap_alloca(map_head, old_name) \
++  prefix_map_remap_alloc_ (map_head, old_name, alloca)
 +
 +
 +/* Parse prefix-maps according to the BUILD_PATH_PREFIX_MAP standard.
@@ -157,7 +161,7 @@ Index: gcc-7-20170319/include/prefix-map.h
 +
 +   Returns 0 on failure and 1 on success.  */
 +int
-+parse_prefix_maps (const char *arg, struct prefix_maps *maps);
++prefix_map_parse (struct prefix_map **map_head, const char *arg);
 +
 +
 +#ifdef __cplusplus
@@ -248,7 +252,7 @@ Index: gcc-7-20170319/libiberty/prefix-map.c
 ===================================================================
 --- /dev/null
 +++ gcc-7-20170319/libiberty/prefix-map.c
-@@ -0,0 +1,236 @@
+@@ -0,0 +1,215 @@
 +/* Definitions for manipulating filename prefixes.
 +
 +   Copyright (C) 2017 Free Software Foundation, Inc.
@@ -288,12 +292,12 @@ Index: gcc-7-20170319/libiberty/prefix-map.c
 +
 +   The input strings are duplicated and a new prefix_map struct is allocated.
 +   Ownership of the duplicates, as well as the new prefix_map, is the same as
-+   the owner of the overall prefix_maps struct.
++   the ownership of the old struct.
 +
 +   Returns 0 on failure and 1 on success.  */
 +int
-+add_prefix_map (const char *new_prefix, const char *old_prefix,
-+		struct prefix_maps *maps)
++prefix_map_push (struct prefix_map **map_head,
++		 const char *new_prefix, const char *old_prefix)
 +{
 +  struct prefix_map *map = XNEW (struct prefix_map);
 +  if (!map)
@@ -309,12 +313,8 @@ Index: gcc-7-20170319/libiberty/prefix-map.c
 +    goto rewind_2;
 +  map->new_len = strlen (new_prefix);
 +
-+  map->next = maps->head;
-+  maps->head = map;
-+
-+  if (map->new_len > maps->max_replace)
-+    maps->max_replace = map->new_len;
-+
++  map->next = *map_head;
++  *map_head = map;
 +  return 1;
 +
 +rewind_2:
@@ -327,16 +327,14 @@ Index: gcc-7-20170319/libiberty/prefix-map.c
 +
 +/* Rewind a prefix map.
 +
-+   Everything up to the given OLD_HEAD is freed, and the fields of MAPS are
-+   replaced with OLD_HEAD and OLD_REPLACE.  */
++   Everything up to the given OLD_HEAD is freed.  */
 +void
-+rewind_prefix_maps (struct prefix_maps *maps,
-+		    struct prefix_map *old_head, size_t old_replace)
++prefix_map_pop_until (struct prefix_map **map_head, struct prefix_map *old_head)
 +{
 +  struct prefix_map *map;
 +  struct prefix_map *next;
 +
-+  for (map = maps->head; map != old_head; map = next)
++  for (map = *map_head; map != old_head; map = next)
 +    {
 +      free ((void *) map->old_prefix);
 +      free ((void *) map->new_prefix);
@@ -344,56 +342,42 @@ Index: gcc-7-20170319/libiberty/prefix-map.c
 +      free (map);
 +    }
 +
-+  maps->head = old_head;
-+  maps->max_replace = old_replace;
++  *map_head = map;
 +}
 +
-+/* Remap a filename.
 +
-+   Returns OLD_NAME unchanged if there was no remapping, otherwise NEW_NAME.
++/* Find a mapping suitable for the given OLD_NAME in the linked list MAP.\
 +
-+   No allocations are performed; it assumes that NEW_NAME has enough space for
-+   any potential remapped value.  */
-+const char *
-+remap_prefix_to (const char *old_name, char *new_name,
-+		 struct prefix_map *map_head)
++   If a mapping is found, writes a pointer to the non-matching suffix part of
++   OLD_NAME in SUFFIX, and its length in SUF_LEN.
++
++   Returns NULL if there was no suitable mapping.  */
++struct prefix_map *
++prefix_map_find (struct prefix_map *map, const char *old_name,
++		 const char **suffix, size_t *suf_len)
 +{
-+  struct prefix_map *map;
-+  const char *name;
-+
-+  for (map = map_head; map; map = map->next)
++  for (; map; map = map->next)
 +    if (filename_ncmp (old_name, map->old_prefix, map->old_len) == 0)
-+      break;
-+  if (!map)
-+    return old_name;
++      {
++	*suf_len = strlen (*suffix = old_name + map->old_len);
++	break;
++      }
 +
-+  name = old_name + map->old_len;
-+  memcpy (new_name, map->new_prefix, map->new_len);
-+  memcpy (new_name + map->new_len, name, strlen (name) + 1);
-+  return new_name;
++  return map;
 +}
 +
++/* Prepend a prefix map before a given SUFFIX.
 +
-+/* Remap a filename.
-+
-+   Returns OLD_NAME unchanged if there was no remapping, otherwise returns a
-+   pointer to newly-allocated memory for the remapped filename.  The caller is
-+   then responsible for freeing it.
-+
-+   That is, if and only if OLD_NAME != return-value, the caller is responsible
-+   for freeing return-value.  The owner of filename remains unchanged.  */
++   The remapped name is written to NEW_NAME and returned as a const pointer. No
++   allocations are performed; the caller must ensure it can hold at least
++   MAP->NEW_LEN + SUF_LEN + 1 characters.  */
 +const char *
-+remap_prefix_alloc (const char *old_name,
-+		    struct prefix_maps *maps,
-+		    void *(*alloc)(size_t size))
++prefix_map_prepend (struct prefix_map *map, char *new_name,
++		    const char *suffix, size_t suf_len)
 +{
-+  const char *name = remap_prefix_alloca (old_name, maps);
-+
-+  if (name == old_name)
-+    return old_name;
-+
-+  size_t len = strlen (name) + 1;
-+  return (char *) memcpy (alloc (len), name, len);
++  memcpy (new_name, map->new_prefix, map->new_len);
++  memcpy (new_name + map->new_len, suffix, suf_len + 1);
++  return new_name;
 +}
 +
 +
@@ -401,7 +385,7 @@ Index: gcc-7-20170319/libiberty/prefix-map.c
 +
 +   Returns 0 on failure and 1 on success.  */
 +int
-+unquote (char *src)
++prefix_map_parse_unquote (char *src)
 +{
 +  for (char *dest = src; 0 != (*dest = *src); ++dest, ++src)
 +    switch (*src)
@@ -432,23 +416,23 @@ Index: gcc-7-20170319/libiberty/prefix-map.c
 +
 +   Returns 0 on failure and 1 on success.  */
 +int
-+parse_prefix_map (char *arg, struct prefix_maps *maps)
++prefix_map_parse1 (struct prefix_map **map_head, char *arg)
 +{
 +  char *p;
 +  p = strchr (arg, '=');
 +  if (!p)
 +    return 0;
 +  *p = '\0';
-+  if (!unquote (arg))
++  if (!prefix_map_parse_unquote (arg))
 +    return 0;
 +  p++;
-+  if (!unquote (p))
++  if (!prefix_map_parse_unquote (p))
 +    return 0;
 +
-+  return add_prefix_map (arg, p, maps);
++  return prefix_map_push (map_head, arg, p);
 +}
 +
-+/* Parse prefix-maps according to the BUILD_PATH_PREFIX_MAP standard.
++/* Parse a prefix-map according to the BUILD_PATH_PREFIX_MAP standard.
 +
 +   The input string value is of the form
 +
@@ -461,22 +445,21 @@ Index: gcc-7-20170319/libiberty/prefix-map.c
 +
 +   Returns 0 on failure and 1 on success.  */
 +int
-+parse_prefix_maps (const char *arg, struct prefix_maps *maps)
++prefix_map_parse (struct prefix_map **map_head, const char *arg)
 +{
-+  struct prefix_map *old_head = maps->head;
-+  size_t old_replace = maps->max_replace;
++  struct prefix_map *old_head = *map_head;
 +
 +  size_t len = strlen (arg);
 +  char *copy = (char *) alloca (len + 1);
-+  memcpy (copy, arg, len + 1); // strtok modifies the string so we have to copy it
++  memcpy (copy, arg, len + 1);
 +
 +  const char *sep = ":";
 +  char *end, *tok = strtok_r (copy, sep, &end);
 +  while (tok != NULL)
 +    {
-+      if (!parse_prefix_map (tok, maps))
++      if (!prefix_map_parse1 (map_head, tok))
 +	{
-+	  rewind_prefix_maps (maps, old_head, old_replace);
++	  prefix_map_pop_until (map_head, old_head);
 +	  return 0;
 +	}
 +
@@ -530,7 +513,7 @@ Index: gcc-7-20170319/gcc/final.c
 -static debug_prefix_map *debug_prefix_maps;
  
 +/* Linked list of `struct prefix_map'.  */
-+static prefix_maps debug_prefix_maps = { NULL, 0 };
++static prefix_map *debug_prefix_maps = NULL;
  
  /* Record a debug file prefix mapping.  ARG is the argument to
     -fdebug-prefix-map and must be of the form OLD=NEW.  */
@@ -543,7 +526,7 @@ Index: gcc-7-20170319/gcc/final.c
    const char *p;
  
    p = strchr (arg, '=');
-@@ -1538,14 +1526,31 @@ add_debug_prefix_map (const char *arg)
+@@ -1538,7 +1526,7 @@ add_debug_prefix_map (const char *arg)
        error ("invalid argument %qs to -fdebug-prefix-map", arg);
        return;
      }
@@ -552,17 +535,10 @@ Index: gcc-7-20170319/gcc/final.c
    map->old_prefix = xstrndup (arg, p - arg);
    map->old_len = p - arg;
    p++;
-   map->new_prefix = xstrdup (p);
-   map->new_len = strlen (p);
--  map->next = debug_prefix_maps;
--  debug_prefix_maps = map;
-+
-+  map->next = debug_prefix_maps.head;
-+  debug_prefix_maps.head = map;
-+  if (map->new_len > debug_prefix_maps.max_replace)
-+    debug_prefix_maps.max_replace = map->new_len;
-+}
-+
+@@ -1548,28 +1536,32 @@ add_debug_prefix_map (const char *arg)
+   debug_prefix_maps = map;
+ }
+ 
 +/* Add debug-prefix-maps from BUILD_PATH_PREFIX_MAP environment variable.  */
 +
 +void
@@ -570,15 +546,16 @@ Index: gcc-7-20170319/gcc/final.c
 +{
 +  const char *arg = getenv ("BUILD_PATH_PREFIX_MAP");
 +
-+  if (!arg || parse_prefix_maps (arg, &debug_prefix_maps))
++  if (!arg || prefix_map_parse (&debug_prefix_maps, arg))
 +    return;
 +
 +  error ("environment variable BUILD_PATH_PREFIX_MAP is "
 +	 "not well formed; see the GCC documentation for more details.");
- }
- 
++}
++
  /* Perform user-specified mapping of debug filename prefixes.  Return
-@@ -1554,22 +1559,12 @@ add_debug_prefix_map (const char *arg)
+    the new name corresponding to FILENAME.  */
+ 
  const char *
  remap_debug_filename (const char *filename)
  {
@@ -591,7 +568,7 @@ Index: gcc-7-20170319/gcc/final.c
 -    if (filename_ncmp (filename, map->old_prefix, map->old_len) == 0)
 -      break;
 -  if (!map)
-+  const char *name = remap_prefix_alloca (filename, &debug_prefix_maps);
++  const char *name = prefix_map_remap_alloca (debug_prefix_maps, filename);
 +
 +  if (name == filename)
      return filename;

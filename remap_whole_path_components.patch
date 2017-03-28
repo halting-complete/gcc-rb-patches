@@ -73,15 +73,18 @@ Index: gcc-7-20170319/libiberty/prefix-map.c
 ===================================================================
 --- gcc-7-20170319.orig/libiberty/prefix-map.c
 +++ gcc-7-20170319/libiberty/prefix-map.c
-@@ -109,14 +109,23 @@ remap_prefix_to (const char *old_name, c
+@@ -101,12 +101,22 @@ struct prefix_map *
+ prefix_map_find (struct prefix_map *map, const char *old_name,
+ 		 const char **suffix, size_t *suf_len)
  {
-   struct prefix_map *map;
-   const char *name;
-+  int len;
- 
-   for (map = map_head; map; map = map->next)
++  size_t len;
++
+   for (; map; map = map->next)
 -    if (filename_ncmp (old_name, map->old_prefix, map->old_len) == 0)
--      break;
+-      {
+-	*suf_len = strlen (*suffix = old_name + map->old_len);
+-	break;
+-      }
 +    {
 +      len = map->old_len;
 +      /* Ignore trailing path separators at the end of old_prefix */
@@ -90,13 +93,11 @@ Index: gcc-7-20170319/libiberty/prefix-map.c
 +      if (! filename_ncmp (old_name, map->old_prefix, len)
 +	  && (IS_DIR_SEPARATOR (old_name[len])
 +	      || old_name[len] == '\0'))
-+	break;
++	{
++	  *suf_len = strlen (*suffix = old_name + len);
++	  break;
++	}
 +    }
-   if (!map)
-     return old_name;
  
--  name = old_name + map->old_len;
-+  name = old_name + len;
-   memcpy (new_name, map->new_prefix, map->new_len);
-   memcpy (new_name + map->new_len, name, strlen (name) + 1);
-   return new_name;
+   return map;
+ }
